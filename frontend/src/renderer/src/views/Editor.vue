@@ -212,14 +212,23 @@
           </el-tab-pane>
           
           <el-tab-pane label="大纲" name="outline">
-            <OutlinePanel 
+            <OutlinePanel
               :active-card="activeCard"
               :volume-number="chapterVolumeNumber"
               :chapter-number="chapterChapterNumber"
             />
           </el-tab-pane>
           </template>
-          
+
+          <el-tab-pane label="伏笔" name="foreshadow">
+            <ForeshadowPanel
+              :project-id="projectStore.currentProject?.id"
+              :active-card="activeCard"
+              :is-chapter-content="isChapterContent"
+              @jump-to-card="handleJumpToCard"
+            />
+          </el-tab-pane>
+
           <el-tab-pane label="审核结果" name="review-history">
             <ReviewHistoryPanel
               :target-card-id="reviewTargetCardIdForSidebar"
@@ -377,6 +386,7 @@ import ChapterToolsPanel from '@renderer/components/panels/ChapterToolsPanel.vue
 import OutlinePanel from '@renderer/components/panels/OutlinePanel.vue'
 import ReviewHistoryPanel from '@renderer/components/panels/ReviewHistoryPanel.vue'
 import RelationGraphPanel from '@renderer/components/panels/RelationGraphPanel.vue'
+import ForeshadowPanel from '@renderer/components/panels/ForeshadowPanel.vue'
 import { useCardStore } from '@renderer/stores/useCardStore'
 import { useEditorStore } from '@renderer/stores/useEditorStore'
 import { useProjectStore } from '@renderer/stores/useProjectStore'
@@ -1479,8 +1489,8 @@ const reviewTargetCardIdForSidebar = computed<number | null>(() => {
 
 const rightSidebarTabNames = computed(() => {
   if (!showRightSidebarTabs.value) return [] as string[]
-  if (isChapterContent.value) return ['assistant', 'context', 'extract', 'outline', 'review-history']
-  return ['assistant', 'review-history']
+  if (isChapterContent.value) return ['assistant', 'context', 'extract', 'outline', 'foreshadow', 'review-history']
+  return ['assistant', 'foreshadow', 'review-history']
 })
 
 // 章节信息提取
