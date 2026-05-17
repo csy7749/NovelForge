@@ -352,3 +352,61 @@ class KGRelation(SQLModel, table=True):
     stance: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=datetime.now, nullable=False)
     updated_at: datetime = Field(default_factory=datetime.now, nullable=False)
+
+
+class AITraceRun(SQLModel, table=True):
+    __tablename__ = "aitracerun"
+
+    id: str = Field(primary_key=True)
+    project_id: Optional[int] = Field(default=None, index=True)
+    card_id: Optional[int] = Field(default=None, index=True)
+    entrypoint: str = Field(index=True)
+    status: str = Field(default="running", index=True)
+    started_at: datetime = Field(default_factory=datetime.now, nullable=False, index=True)
+    ended_at: Optional[datetime] = None
+    metadata_json: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+
+
+class AITraceStep(SQLModel, table=True):
+    __tablename__ = "aitracestep"
+
+    id: str = Field(primary_key=True)
+    run_id: str = Field(index=True)
+    name: str = Field(index=True)
+    kind: str = Field(index=True)
+    status: str = Field(default="running", index=True)
+    timestamp: datetime = Field(default_factory=datetime.now, nullable=False, index=True)
+    started_at: datetime = Field(default_factory=datetime.now, nullable=False)
+    ended_at: Optional[datetime] = None
+    external_id: Optional[str] = Field(default=None, index=True)
+    input_summary: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    output_summary: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    input_schema: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    output_schema: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    error: Optional[str] = None
+    metadata_json: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+
+
+class AITraceSource(SQLModel, table=True):
+    __tablename__ = "aitracesource"
+
+    id: str = Field(primary_key=True)
+    step_id: str = Field(index=True)
+    source_type: str = Field(index=True)
+    source_ref: Optional[str] = Field(default=None, index=True)
+    label: str
+    preview: Optional[str] = None
+    jump_target: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    metadata_json: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+
+
+class AITraceSpan(SQLModel, table=True):
+    __tablename__ = "aitracespan"
+
+    id: str = Field(primary_key=True)
+    step_id: str = Field(index=True)
+    source_id: str = Field(index=True)
+    start_offset: int
+    end_offset: int
+    text: Optional[str] = None
+    metadata_json: Optional[dict] = Field(default=None, sa_column=Column(JSON))

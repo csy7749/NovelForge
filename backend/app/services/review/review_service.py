@@ -21,6 +21,8 @@ from app.services.ai.orchestration import (
     build_success_result,
 )
 from app.services.ai.core import llm_service
+from app.schemas.ai_trace import TraceRunCreate, TraceStepCreate, TraceStepFinish
+from app.services.ai_trace_service import get_ai_trace_service
 from app.services.review.review_prompt_builders import build_review_prompt
 
 QUALITY_GATE_PATTERN = re.compile(
@@ -273,6 +275,28 @@ async def run_review(session: Session, request: ReviewRunRequest) -> ReviewRunRe
         route_key="review",
         context={"project_id": project_id, "target_field": request.target_field},
     )
+    trace_service = get_ai_trace_service(session)
+    trace_run = trace_service.create_run(
+        TraceRunCreate(
+            project_id=project_id,
+            card_id=request.card_id,
+            entrypoint="chapter_review",
+            metadata={"prompt_name": prompt_name, "review_profile": review_profile},
+        )
+    )
+    trace_step = trace_service.start_step(
+        TraceStepCreate(
+            run_id=trace_run.id,
+            name="审核卡片内容",
+            kind="review",
+            input_payload={
+                "card_id": request.card_id,
+                "target_field": request.target_field,
+                "review_profile": review_profile,
+                "content_snapshot": request.content_snapshot,
+            },
+        )
+    )
 
     try:
         review_text = await llm_service.generate_review(
@@ -285,7 +309,21 @@ async def run_review(session: Session, request: ReviewRunRequest) -> ReviewRunRe
             timeout=request.timeout,
         )
     except ValueError as exc:
+        trace_service.fail_step(TraceStepFinish(step_id=trace_step.id, error=str(exc)))
+        trace_service.finish_run(trace_run.id, "failed", error=str(exc))
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        trace_service.fail_step(TraceStepFinish(step_id=trace_step.id, error=str(exc)))
+        trace_service.finish_run(trace_run.id, "failed", error=str(exc))
+        raise
+    trace_service.finish_step(
+        TraceStepFinish(
+            step_id=trace_step.id,
+            status="succeeded",
+            output_payload={"review_text": review_text, "quality_gate": parse_quality_gate(review_text)},
+        )
+    )
+    trace_service.finish_run(trace_run.id, "succeeded")
 
     draft_meta = dict(request.meta or {})
     draft_meta["agent_result"] = build_success_result(

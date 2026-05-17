@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.endpoints import ai, cards, llm_configs, projects, prompts
+from app.api.endpoints import ai_traces as ai_traces_ep
 from app.api.endpoints import assistant as assistant_ep
 from app.api.endpoints import chapter_reviews as chapter_reviews_ep
 from app.api.endpoints import context as context_ep
@@ -28,4 +29,5 @@ api_router.include_router(memory_ep.router, prefix="/memory", tags=["memory"])
 api_router.include_router(relation_graph_ep.router, prefix="/relation-graph", tags=["relation-graph"])
 api_router.include_router(foreshadow_ep.router, prefix="/foreshadow", tags=["foreshadow"])
 api_router.include_router(knowledge_ep.router, prefix="/knowledge", tags=["knowledge"])
+api_router.include_router(ai_traces_ep.router, prefix="/ai-traces", tags=["ai-traces"])
 api_router.include_router(workflows_ep.router, tags=["workflows"])

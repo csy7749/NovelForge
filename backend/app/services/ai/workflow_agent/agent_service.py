@@ -12,6 +12,8 @@ from app.services import prompt_service
 from app.services.workflow import get_all_node_metadata
 from app.services.ai.core.react_text_agent import stream_chat_with_react_protocol
 from app.services.ai.core.tool_agent_stream import stream_agent_with_tools
+from app.schemas.ai_trace import TraceRunCreate, TraceStepCreate, TraceStepFinish
+from app.services.ai_trace_service import get_ai_trace_service
 from .tools import (
     WORKFLOW_AGENT_TOOL_DESCRIPTIONS,
     WORKFLOW_AGENT_TOOL_REGISTRY,
@@ -267,18 +269,67 @@ async def generate_workflow_agent_chat_streaming(
     request: WorkflowAgentChatRequest,
     system_prompt: str,
 ) -> AsyncGenerator[str, None]:
+    trace_service = get_ai_trace_service(session)
+    trace_run = trace_service.create_run(
+        TraceRunCreate(
+            entrypoint="workflow_agent_chat",
+            metadata={
+                "workflow_id": request.workflow_id,
+                "mode": request.mode.value,
+                "react_mode_enabled": bool(request.react_mode_enabled),
+            },
+        )
+    )
+    generation_step = trace_service.start_step(
+        TraceStepCreate(
+            run_id=trace_run.id,
+            name="工作流 Agent 回复",
+            kind="generation",
+            input_payload={"workflow_id": request.workflow_id, "user_prompt": request.user_prompt},
+        )
+    )
+    visible_parts: list[str] = []
+    yield json.dumps({"type": "trace_run", "data": {"run_id": trace_run.id}}, ensure_ascii=False)
+
     try:
         async for evt in stream_workflow_agent_chat(
             session=session,
             request=request,
             system_prompt=system_prompt,
         ):
+            evt_type = evt.get("type") if isinstance(evt, dict) else None
+            evt_data = evt.get("data") if isinstance(evt, dict) else None
+            if evt_type in ("tool_start", "tool_end"):
+                trace_service.record_event(trace_run.id, evt)
+            if evt_type == "token" and isinstance(evt_data, dict):
+                visible_parts.append(str(evt_data.get("text") or ""))
             yield json.dumps(evt, ensure_ascii=False)
+        trace_service.finish_step(
+            TraceStepFinish(
+                step_id=generation_step.id,
+                status="succeeded",
+                output_payload={"text": "".join(visible_parts)},
+            )
+        )
+        trace_service.finish_run(trace_run.id, "succeeded")
     except asyncio.CancelledError:
         logger.info("[WorkflowAgent] cancelled")
+        trace_service.finish_step(
+            TraceStepFinish(step_id=generation_step.id, status="failed", error="调用被取消")
+        )
+        trace_service.finish_run(trace_run.id, "cancelled", error="调用被取消")
         return
     except Exception as exc:
         logger.error("[WorkflowAgent] streaming failed: {}", exc)
+        trace_service.finish_step(
+            TraceStepFinish(
+                step_id=generation_step.id,
+                status="failed",
+                output_payload={"text": "".join(visible_parts)},
+                error=str(exc),
+            )
+        )
+        trace_service.finish_run(trace_run.id, "failed", error=str(exc))
         error_event = {"type": "error", "data": {"error": str(exc)}}
         yield json.dumps(error_event, ensure_ascii=False)
         return

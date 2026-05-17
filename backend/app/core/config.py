@@ -136,6 +136,9 @@ class AISettings(BaseSettings):
     
     # 模型调用失败时最大重试次数
     max_tool_call_retries: int = Field(default=3, alias="MAX_TOOL_CALL_RETRIES")
+
+    # AI 执行痕迹存储模式：sqlite | memory。必须显式配置，不做静默降级。
+    trace_storage_mode: str = Field(default="sqlite", alias="AI_TRACE_STORAGE_MODE")
     
     class Config:
         env_file = ".env"
@@ -211,6 +214,7 @@ class Settings:
             f"  kg_provider={self.kg.provider},\n"
             f"  neo4j_uri={self.neo4j.get_uri()},\n"
             f"  max_retries={self.ai.max_tool_call_retries},\n"
+            f"  ai_trace_storage_mode={self.ai.trace_storage_mode},\n"
             f"  bootstrap_overwrite={self.bootstrap.should_overwrite},\n"
             f"  bootstrap_overwrite_card_schemas={self.bootstrap.should_overwrite_card_schemas},\n"
             f"  app_name={self.app.app_name}\n"

@@ -10,6 +10,7 @@ class ContinuationRequest(BaseModel):
     stream: bool = False
     # 可选上下文字段（向后兼容）
     project_id: Optional[int] = None
+    card_id: Optional[int] = None
     volume_number: Optional[int] = None
     chapter_number: Optional[int] = None
     participants: Optional[List[str]] = None
@@ -47,6 +48,7 @@ class AssistantChatRequest(BaseModel):
     
     # 必需字段
     project_id: int = Field(description="项目ID（用于工具调用作用域）")
+    card_id: Optional[int] = Field(default=None, description="当前卡片ID（用于关联执行痕迹）")
     llm_config_id: int = Field(description="LLM配置ID")
     prompt_name: str = Field(default="灵感对话", description="系统提示词名称")
     

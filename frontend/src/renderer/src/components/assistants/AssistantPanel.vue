@@ -241,7 +241,7 @@ import { useMessageListScroll } from '@renderer/composables/useMessageListScroll
 import type { AssistantChatSession, AssistantPanelMessage } from '@renderer/types/assistantPanel'
 import type { AssistantRef } from '@renderer/api/ai'
 
-const props = defineProps<{ resolvedContext: string; llmConfigId?: number | null; promptName?: string | null; temperature?: number | null; max_tokens?: number | null; timeout?: number | null; effectiveSchema?: any; generationPromptName?: string | null; currentCardTitle?: string | null; currentCardContent?: any }>()
+const props = defineProps<{ resolvedContext: string; llmConfigId?: number | null; promptName?: string | null; temperature?: number | null; max_tokens?: number | null; timeout?: number | null; effectiveSchema?: any; generationPromptName?: string | null; currentCardId?: number | null; currentCardTitle?: string | null; currentCardContent?: any }>()
 const emit = defineEmits<{ 'finalize': [string]; 'refresh-context': []; 'reset-selection': []; 'jump-to-card': [{ projectId: number; cardId: number }] }>()
 const messages = ref<AssistantPanelMessage[]>([])
 const draft = ref('')
@@ -422,6 +422,7 @@ async function startStreaming(targetIdx: number) {
     llm_config_id: overrideLlmId.value || undefined,
     prompt_name: promptName,
     project_id: projectStore.currentProject?.id as number,
+    card_id: props.currentCardId || undefined,
     stream: true,
     thinking_enabled: useThinkingMode.value
   } as any, (chunk) => {

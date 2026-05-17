@@ -185,11 +185,20 @@
               :timeout="assistantParams.timeout as any"
               :effective-schema="assistantEffectiveSchema"
               :generation-prompt-name="assistantParams.prompt_name as any"
+              :current-card-id="assistantSelectionCleared ? null : Number((activeCard as any)?.id || 0)"
               :current-card-title="assistantSelectionCleared ? '' : (activeCard?.title as any)"
               :current-card-content="assistantSelectionCleared ? null : (activeCard?.content as any)"
               @refresh-context="refreshAssistantContext"
               @reset-selection="resetAssistantSelection"
               @finalize="assistantFinalize"
+              @jump-to-card="handleJumpToCard"
+            />
+          </el-tab-pane>
+
+          <el-tab-pane label="洞察" name="insight">
+            <TraceInsightPanel
+              :project-id="projectStore.currentProject?.id"
+              :card-id="activeCard ? Number((activeCard as any).id) : null"
               @jump-to-card="handleJumpToCard"
             />
           </el-tab-pane>
@@ -248,6 +257,7 @@
         :timeout="assistantParams.timeout as any"
         :effective-schema="assistantEffectiveSchema"
         :generation-prompt-name="assistantParams.prompt_name as any"
+        :current-card-id="assistantSelectionCleared ? null : Number((activeCard as any)?.id || 0)"
         :current-card-title="assistantSelectionCleared ? '' : (activeCard?.title as any)"
         :current-card-content="assistantSelectionCleared ? null : (activeCard?.content as any)"
         @refresh-context="refreshAssistantContext"
@@ -387,6 +397,7 @@ import OutlinePanel from '@renderer/components/panels/OutlinePanel.vue'
 import ReviewHistoryPanel from '@renderer/components/panels/ReviewHistoryPanel.vue'
 import RelationGraphPanel from '@renderer/components/panels/RelationGraphPanel.vue'
 import ForeshadowPanel from '@renderer/components/panels/ForeshadowPanel.vue'
+import TraceInsightPanel from '@renderer/components/panels/TraceInsightPanel.vue'
 import { useCardStore } from '@renderer/stores/useCardStore'
 import { useEditorStore } from '@renderer/stores/useEditorStore'
 import { useProjectStore } from '@renderer/stores/useProjectStore'
@@ -1489,8 +1500,8 @@ const reviewTargetCardIdForSidebar = computed<number | null>(() => {
 
 const rightSidebarTabNames = computed(() => {
   if (!showRightSidebarTabs.value) return [] as string[]
-  if (isChapterContent.value) return ['assistant', 'context', 'extract', 'outline', 'foreshadow', 'review-history']
-  return ['assistant', 'foreshadow', 'review-history']
+  if (isChapterContent.value) return ['assistant', 'insight', 'context', 'extract', 'outline', 'foreshadow', 'review-history']
+  return ['assistant', 'insight', 'foreshadow', 'review-history']
 })
 
 // 章节信息提取

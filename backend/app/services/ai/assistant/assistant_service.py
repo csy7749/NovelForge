@@ -22,6 +22,8 @@ from app.services.ai.core.quota_manager import precheck_quota, record_usage
 from app.services.ai.core.react_text_agent import stream_chat_with_react_protocol
 from app.services.ai.core.tool_agent_stream import stream_agent_with_tools
 from app.services.ai.core.token_utils import calc_input_tokens, estimate_tokens
+from app.schemas.ai_trace import TraceRunCreate, TraceStepCreate, TraceStepFinish
+from app.services.ai_trace_service import AITraceService, get_ai_trace_service
 from .tools import (
     ASSISTANT_TOOL_DESCRIPTIONS,
     ASSISTANT_TOOL_REGISTRY,
@@ -47,6 +49,75 @@ ASSISTANT_REACT_PROTOCOL_INSTRUCTIONS = """
 4) 若参数中包含长文本，必须输出合法 JSON（换行与引号要正确转义）。
 5) 不要输出伪调用文本（例如 tool(...)）。
 """.strip()
+
+
+def _assistant_mode_label(
+    *,
+    multi_agent_enabled: bool,
+    fallback_plain_chat: bool,
+    react_enabled: bool,
+) -> str:
+    if multi_agent_enabled and not fallback_plain_chat and not react_enabled:
+        return "multi_agent"
+    if fallback_plain_chat:
+        return "plain"
+    return "react" if react_enabled else "standard_tools"
+
+
+def _create_assistant_trace(
+    trace_service: AITraceService,
+    request: AssistantChatRequest,
+    mode_label: str,
+):
+    return trace_service.create_run(
+        TraceRunCreate(
+            project_id=request.project_id,
+            card_id=getattr(request, "card_id", None),
+            entrypoint="assistant_chat",
+            metadata={"mode": mode_label, "prompt_name": request.prompt_name},
+        )
+    )
+
+
+def _record_context_trace(
+    trace_service: AITraceService,
+    run_id: str,
+    request: AssistantChatRequest,
+) -> None:
+    step = trace_service.start_step(
+        TraceStepCreate(
+            run_id=run_id,
+            name="装配创作上下文",
+            kind="context",
+            input_payload={"context_info": request.context_info, "user_prompt": request.user_prompt},
+        )
+    )
+    trace_service.finish_step(
+        TraceStepFinish(
+            step_id=step.id,
+            status="succeeded",
+            output_payload={
+                "context_chars": len(request.context_info or ""),
+                "user_prompt_chars": len(request.user_prompt or ""),
+            },
+        )
+    )
+
+
+def _start_generation_trace(
+    trace_service: AITraceService,
+    run_id: str,
+    request: AssistantChatRequest,
+    mode_label: str,
+):
+    return trace_service.start_step(
+        TraceStepCreate(
+            run_id=run_id,
+            name="生成可见回复",
+            kind="generation",
+            input_payload={"mode": mode_label, "llm_config_id": request.llm_config_id},
+        )
+    )
 
 
 def _should_fallback_to_plain_chat(session: Session, llm_config_id: int) -> bool:
@@ -229,13 +300,14 @@ async def generate_assistant_chat_streaming(
     react_enabled = bool(getattr(request, "react_mode_enabled", False))
     fallback_plain_chat = _should_fallback_to_plain_chat(session, request.llm_config_id)
     multi_agent_enabled = bool(getattr(request, "multi_agent_enabled", False))
+    mode_label = _assistant_mode_label(
+        multi_agent_enabled=multi_agent_enabled,
+        fallback_plain_chat=fallback_plain_chat,
+        react_enabled=react_enabled,
+    )
     logger.info(
         "[LangChain] generate_assistant_chat_streaming: 使用{}模式，模型id:{}",
-        (
-            "多Agent"
-            if multi_agent_enabled and not fallback_plain_chat and not react_enabled
-            else "Responses降级纯对话" if fallback_plain_chat else ("React" if react_enabled else "标准")
-        ),
+        mode_label,
         request.llm_config_id
     )
 
@@ -247,6 +319,13 @@ async def generate_assistant_chat_streaming(
         engine = stream_chat_with_react if react_enabled else stream_chat_with_tools
     has_visible_output = False
     has_tool_events = False
+    visible_parts: list[str] = []
+    trace_service = get_ai_trace_service(session)
+    trace_run = _create_assistant_trace(trace_service, request, mode_label)
+    _record_context_trace(trace_service, trace_run.id, request)
+    generation_step = _start_generation_trace(trace_service, trace_run.id, request, mode_label)
+
+    yield json.dumps({"type": "trace_run", "data": {"run_id": trace_run.id}}, ensure_ascii=False)
 
     try:
         async for evt in engine(
@@ -261,8 +340,12 @@ async def generate_assistant_chat_streaming(
                 evt_text = str(evt_data.get("text") or "")
                 if evt_text.strip():
                     has_visible_output = True
+                    if evt_type == "token":
+                        visible_parts.append(evt_text)
             elif evt_type in ("tool_start", "tool_end", "tool_summary"):
                 has_tool_events = True
+                if evt_type in ("tool_start", "tool_end"):
+                    trace_service.record_event(trace_run.id, evt)
 
             yield json.dumps(evt, ensure_ascii=False)
 
@@ -279,11 +362,39 @@ async def generate_assistant_chat_streaming(
                 },
                 ensure_ascii=False,
             )
+            visible_parts.append(fallback_text)
+
+        trace_service.finish_step(
+            TraceStepFinish(
+                step_id=generation_step.id,
+                status="succeeded",
+                output_payload={"text": "".join(visible_parts)},
+            )
+        )
+        trace_service.finish_run(trace_run.id, "succeeded")
     except asyncio.CancelledError:
         logger.info("[LangChain] 助手调用被取消（CancelledError）")
+        trace_service.finish_step(
+            TraceStepFinish(
+                step_id=generation_step.id,
+                status="failed",
+                output_payload={"text": "".join(visible_parts)},
+                error="调用被取消",
+            )
+        )
+        trace_service.finish_run(trace_run.id, "cancelled", error="调用被取消")
         return
     except Exception as exc:
         logger.error("[LangChain] 灵感助手生成失败: {}", exc)
+        trace_service.finish_step(
+            TraceStepFinish(
+                step_id=generation_step.id,
+                status="failed",
+                output_payload={"text": "".join(visible_parts)},
+                error=str(exc),
+            )
+        )
+        trace_service.finish_run(trace_run.id, "failed", error=str(exc))
         error_event = {
             "type": "error",
             "data": {"error": str(exc)},

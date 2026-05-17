@@ -28,6 +28,8 @@ from app.services.ai.generation.instruction_validator import validate_instructio
 from app.services.ai.generation.instruction_generator import generate_instruction_stream
 from app.services.ai.generation.prompt_builder import build_instruction_system_prompt
 from app.schemas.instruction import InstructionGenerateRequest
+from app.schemas.ai_trace import TraceRunCreate, TraceStepCreate, TraceStepFinish
+from app.services.ai_trace_service import get_ai_trace_service
 from app.schemas.wizard import Tags as _Tags
 from loguru import logger
 
@@ -176,6 +178,27 @@ async def generate_ai_content(
     user_prompt = request.input['input_text']
     deps_str = request.deps or ""
 
+    project_id = request.input.get("project_id") if isinstance(request.input, dict) else None
+    card_id = request.input.get("card_id") if isinstance(request.input, dict) else None
+    trace_service = get_ai_trace_service(session)
+    trace_run = trace_service.create_run(
+        TraceRunCreate(
+            project_id=int(project_id) if project_id else None,
+            card_id=int(card_id) if card_id else None,
+            entrypoint="general_ai_generate",
+            metadata={"prompt_name": request.prompt_name},
+        )
+    )
+    trace_step = trace_service.start_step(
+        TraceStepCreate(
+            run_id=trace_run.id,
+            name="通用结构化生成",
+            kind="generation",
+            input_payload={"input": request.input, "response_model_schema": request.response_model_schema},
+            input_schema=schema_for_prompt if isinstance(schema_for_prompt, dict) else None,
+        )
+    )
+
     try:
         result = await llm_service.generate_structured(
             session=session,
@@ -189,7 +212,17 @@ async def generate_ai_content(
             deps=deps_str,
         )
     except ValueError as e:
+        trace_service.fail_step(TraceStepFinish(step_id=trace_step.id, error=str(e)))
+        trace_service.finish_run(trace_run.id, "failed", error=str(e))
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        trace_service.fail_step(TraceStepFinish(step_id=trace_step.id, error=str(e)))
+        trace_service.finish_run(trace_run.id, "failed", error=str(e))
+        raise
+    trace_service.finish_step(
+        TraceStepFinish(step_id=trace_step.id, status="succeeded", output_payload=result)
+    )
+    trace_service.finish_run(trace_run.id, "succeeded")
     # 触发 OnGenerateFinish（若能定位 card）
     card: Card | None = None
     try:
@@ -198,9 +231,7 @@ async def generate_ai_content(
             card_id = request.input.get('card_id')
         if card_id:
             card = session.get(Card, int(card_id))
-        project_id = None
-        if isinstance(request.input, dict):
-            project_id = request.input.get('project_id') or (card.project_id if card else None)
+        project_id = project_id or (card.project_id if card else None)
         emit_event("generate.finished", {
             "session": session,
             "card": card,
@@ -238,6 +269,42 @@ async def generate_continuation(
 
 
         request.context_info = enrich_continuation_context_info(session, request)
+        trace_service = get_ai_trace_service(session)
+        trace_run = trace_service.create_run(
+            TraceRunCreate(
+                project_id=request.project_id,
+                card_id=request.card_id,
+                entrypoint="continuation_generate",
+                metadata={"prompt_name": request.prompt_name, "stream": request.stream},
+            )
+        )
+        context_step = trace_service.start_step(
+            TraceStepCreate(
+                run_id=trace_run.id,
+                name="装配续写上下文",
+                kind="context",
+                input_payload={"context_info": request.context_info},
+            )
+        )
+        trace_service.finish_step(
+            TraceStepFinish(
+                step_id=context_step.id,
+                status="succeeded",
+                output_payload={"context_chars": len(request.context_info or "")},
+            )
+        )
+        generation_step = trace_service.start_step(
+            TraceStepCreate(
+                run_id=trace_run.id,
+                name="续写正文",
+                kind="generation",
+                input_payload={
+                    "project_id": request.project_id,
+                    "card_id": request.card_id,
+                    "previous_content": request.previous_content,
+                },
+            )
+        )
         
 
         if request.stream:
@@ -248,9 +315,28 @@ async def generate_continuation(
                 raise HTTPException(status_code=400, detail=f"LLM 配额不足：{reason}")
             async def _stream_and_trigger():
                 content_acc = []
-                async for chunk in llm_service.generate_continuation_streaming(session, request, system_prompt):
-                    content_acc.append(chunk)
-                    yield chunk
+                try:
+                    async for chunk in llm_service.generate_continuation_streaming(session, request, system_prompt):
+                        content_acc.append(chunk)
+                        yield chunk
+                    trace_service.finish_step(
+                        TraceStepFinish(
+                            step_id=generation_step.id,
+                            status="succeeded",
+                            output_payload={"text": "".join(content_acc)},
+                        )
+                    )
+                    trace_service.finish_run(trace_run.id, "succeeded")
+                except Exception as exc:
+                    trace_service.fail_step(
+                        TraceStepFinish(
+                            step_id=generation_step.id,
+                            output_payload={"text": "".join(content_acc)},
+                            error=str(exc),
+                        )
+                    )
+                    trace_service.finish_run(trace_run.id, "failed", error=str(exc))
+                    raise
                 try:
                     # 续写结束后触发
                     emit_event("generate.finished", {
@@ -267,6 +353,14 @@ async def generate_continuation(
             async for chunk in llm_service.generate_continuation_streaming(session, request, system_prompt):
                 content_parts.append(chunk)
             result = "".join(content_parts)
+            trace_service.finish_step(
+                TraceStepFinish(
+                    step_id=generation_step.id,
+                    status="succeeded",
+                    output_payload={"text": result},
+                )
+            )
+            trace_service.finish_run(trace_run.id, "succeeded")
             try:
                 emit_event("generate.finished", {
                     "session": session,

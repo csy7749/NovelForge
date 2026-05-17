@@ -3032,6 +3032,7 @@ function applyContinuationScope(requestData: ContinuationRequest) {
 			?? ((localCard.content as any)?.chapter_number as number | undefined)
 
 		if (Number.isFinite(scopeProjectId as number)) (requestData as any).project_id = scopeProjectId
+		if (Number.isFinite(Number((props.card as any)?.id))) (requestData as any).card_id = Number((props.card as any).id)
 		if (Number.isFinite(scopeVolumeNumber as number)) (requestData as any).volume_number = scopeVolumeNumber
 		if (Number.isFinite(scopeChapterNumber as number)) (requestData as any).chapter_number = scopeChapterNumber
 	} catch {}
