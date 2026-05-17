@@ -34,6 +34,7 @@ export interface ExtractPreviewResponse {
 	extractor_code: string
 	preview_data: Record<string, any>
 	affected_targets: Array<Record<string, any>>
+	agent_result?: Record<string, any> | null
 }
 
 export interface ApplyPreviewRequest {

@@ -12,6 +12,7 @@ from app.schemas.entity import (
 	UpdateDynamicInfo,
 )
 from app.schemas.relation_extract import RelationExtraction
+from app.schemas.agent_orchestration import AgentResult
 
 
 class ParticipantTyped(BaseModel):
@@ -132,6 +133,7 @@ class ExtractPreviewResponse(BaseModel):
 	extractor_code: str
 	preview_data: Dict[str, Any]
 	affected_targets: List[Dict[str, Any]] = Field(default_factory=list)
+	agent_result: Optional[AgentResult] = None
 
 
 class ApplyPreviewRequest(BaseModel):

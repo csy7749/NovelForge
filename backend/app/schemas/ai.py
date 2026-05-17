@@ -60,6 +60,9 @@ class AssistantChatRequest(BaseModel):
     context_summarization_enabled: Optional[bool] = Field(default=None, description="是否启用上下文摘要中间件（对过长对话做摘要压缩）")
     context_summarization_threshold: Optional[int] = Field(default=None, description="触发上下文摘要的 token 阈值")
     react_mode_enabled: Optional[bool] = Field(default=None, description="是否启用 React 文本协议工具调用模式")
+    multi_agent_enabled: Optional[bool] = Field(default=None, description="是否启用多 agent 编排路由")
+    agent_task_type: Optional[str] = Field(default=None, description="多 agent 路由任务类型，例如 writing/review/memory_extraction")
+    agent_requested_tools: Optional[List[str]] = Field(default=None, description="本次委派允许暴露给目标 agent 的工具名")
 
 
 class GeneralAIRequest(BaseModel):

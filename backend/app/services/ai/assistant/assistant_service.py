@@ -17,6 +17,7 @@ from sqlmodel import Session
 from app.schemas.ai import AssistantChatRequest
 from app.services import llm_config_service
 from app.services.ai.core.chat_model_factory import build_chat_model
+from app.services.ai.orchestration import stream_assistant_with_multi_agent
 from app.services.ai.core.quota_manager import precheck_quota, record_usage
 from app.services.ai.core.react_text_agent import stream_chat_with_react_protocol
 from app.services.ai.core.tool_agent_stream import stream_agent_with_tools
@@ -227,13 +228,20 @@ async def generate_assistant_chat_streaming(
     _ = track_stats
     react_enabled = bool(getattr(request, "react_mode_enabled", False))
     fallback_plain_chat = _should_fallback_to_plain_chat(session, request.llm_config_id)
+    multi_agent_enabled = bool(getattr(request, "multi_agent_enabled", False))
     logger.info(
         "[LangChain] generate_assistant_chat_streaming: 使用{}模式，模型id:{}",
-        "Responses降级纯对话" if fallback_plain_chat else ("React" if react_enabled else "标准"),
+        (
+            "多Agent"
+            if multi_agent_enabled and not fallback_plain_chat and not react_enabled
+            else "Responses降级纯对话" if fallback_plain_chat else ("React" if react_enabled else "标准")
+        ),
         request.llm_config_id
     )
 
-    if fallback_plain_chat:
+    if multi_agent_enabled and not fallback_plain_chat and not react_enabled:
+        engine = stream_assistant_with_multi_agent
+    elif fallback_plain_chat:
         engine = stream_chat_plain
     else:
         engine = stream_chat_with_react if react_enabled else stream_chat_with_tools

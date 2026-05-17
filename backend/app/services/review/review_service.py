@@ -15,6 +15,11 @@ from app.schemas.chapter_review import (
     ReviewRunResponse,
 )
 from app.services import prompt_service
+from app.services.ai.orchestration import (
+    DEFAULT_AGENT_REGISTRY,
+    build_delegated_task,
+    build_success_result,
+)
 from app.services.ai.core import llm_service
 from app.services.review.review_prompt_builders import build_review_prompt
 
@@ -260,6 +265,14 @@ async def run_review(session: Session, request: ReviewRunRequest) -> ReviewRunRe
     prompt_name = request.prompt_name or "通用审核"
     system_prompt = _build_system_prompt(session, prompt_name)
     user_prompt = build_review_prompt(request)
+    role = DEFAULT_AGENT_REGISTRY.resolve("review")
+    task = build_delegated_task(
+        task_type="review",
+        target_agent_id=role.agent_id,
+        content=f"card_id={request.card_id}; profile={review_profile}",
+        route_key="review",
+        context={"project_id": project_id, "target_field": request.target_field},
+    )
 
     try:
         review_text = await llm_service.generate_review(
@@ -274,6 +287,13 @@ async def run_review(session: Session, request: ReviewRunRequest) -> ReviewRunRe
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    draft_meta = dict(request.meta or {})
+    draft_meta["agent_result"] = build_success_result(
+        task,
+        "审校完成",
+        {"review_profile": review_profile},
+    ).model_dump(mode="json")
+
     draft = _build_draft_result(
         session=session,
         project_id=project_id,
@@ -286,7 +306,7 @@ async def run_review(session: Session, request: ReviewRunRequest) -> ReviewRunRe
         prompt_name=prompt_name,
         llm_config_id=request.llm_config_id,
         content_snapshot=request.content_snapshot,
-        meta=request.meta,
+        meta=draft_meta,
     )
     return ReviewRunResponse(review_text=review_text, draft=draft)
 

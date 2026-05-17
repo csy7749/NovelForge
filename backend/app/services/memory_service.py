@@ -22,6 +22,11 @@ from app.schemas.memory import ParticipantTyped
 from app.services import prompt_service
 from app.services.memory_extractors.memory_base import log_extract_prompt
 from app.services.memory_extractors.registry_factory import get_memory_extractor_registry
+from app.services.ai.orchestration import (
+    DEFAULT_AGENT_REGISTRY,
+    build_delegated_task,
+    build_success_result,
+)
 
 # 使用可切换的知识图谱 Provider
 from app.services.kg_provider import get_provider, KnowledgeGraphUnavailableError
@@ -137,6 +142,15 @@ class MemoryService:
         chapter_number: Optional[int] = None,
     ) -> Dict[str, Any]:
         extractor = self.extractor_registry.get(extractor_code)
+        route_key = "relation" if extractor.code == "relation" else "memory_extraction"
+        role = DEFAULT_AGENT_REGISTRY.resolve(route_key)
+        task = build_delegated_task(
+            task_type=route_key,
+            target_agent_id=role.agent_id,
+            content=f"extractor={extractor.code}",
+            route_key=route_key,
+            context={"project_id": project_id},
+        )
         typed_participants = participants or []
         data = await extractor.extract(
             service=self,
@@ -158,6 +172,11 @@ class MemoryService:
             "extractor_code": extractor.code,
             "preview_data": data.model_dump(mode="json"),
             "affected_targets": extractor.build_affected_targets(data),
+            "agent_result": build_success_result(
+                task,
+                f"{extractor.name}完成",
+                {"extractor_code": extractor.code},
+            ).model_dump(mode="json"),
         }
 
     def apply_preview(
