@@ -77,91 +77,78 @@ _KB_NAME_PATTERN = re.compile(r"@KB\{\s*name\s*=\s*([^}]+)\}")
 
 
 def inject_knowledge(session: Session, template: str) -> str:
-    """将模板中的知识库占位符注入为实际内容
-    
-    规则：
-    1) 对 "- knowledge:" 段落内的多个占位符，按顺序注入并以编号分隔：
-       - knowledge:\n1.\n<KB1>\n\n2.\n<KB2> ...
-    2) knowledge 段之外若出现占位符，做就地替换为知识全文。
-    3) 若找不到对应知识库，保留提示注释，避免中断。
-    
-    Args:
-        session: 数据库会话
-        template: 提示词模板
-        
-    Returns:
-        注入知识库后的模板
-    """
     from app.services.knowledge_service import KnowledgeService
-    
+
     svc = KnowledgeService(session)
+    enumerated_text = _render_knowledge_sections(svc, template)
+    return _replace_inline_knowledge(svc, enumerated_text)
 
-    def fetch_kb_by_id(kid: int) -> str:
-        kb = svc.get_by_id(kid)
-        return kb.content if kb and kb.content else f"/* 知识库未找到: id={kid} */"
 
-    def fetch_kb_by_name(name: str) -> str:
-        kb = svc.get_by_name(name)
-        return kb.content if kb and kb.content else f"/* 知识库未找到: name={name} */"
-
-    # 先处理 knowledge 分段（更结构化的注入）
+def _render_knowledge_sections(svc: Any, template: str) -> str:
     lines = template.splitlines()
-    i = 0
     out_lines: list[str] = []
-    while i < len(lines):
-        line = lines[i]
-        # 匹配顶级的 "- knowledge:" 行（大小写不敏感）
-        if re.match(r"^\s*-\s*knowledge\s*:\s*$", line, flags=re.IGNORECASE):
-            # 收集该段落内的占位符行，直到遇到下一个顶级 "- <Something>" 行或文件结尾
-            j = i + 1
-            block_lines: list[str] = []
-            while j < len(lines) and not re.match(r"^\s*-\s*\w", lines[j]):
-                block_lines.append(lines[j])
-                j += 1
-            # 提取占位符顺序
-            placeholders: list[tuple[str, str]] = []  # (mode, value)
-            for bl in block_lines:
-                for m in _KB_ID_PATTERN.finditer(bl):
-                    placeholders.append(("id", m.group(1)))
-                for m in _KB_NAME_PATTERN.finditer(bl):
-                    placeholders.append(("name", m.group(1).strip().strip('\"\'')))
-            # 构建编号内容
-            out_lines.append(line)  # 保留标题行 "- knowledge:"
-            if placeholders:
-                for idx, (mode, val) in enumerate(placeholders, start=1):
-                    out_lines.append(f"{idx}.")
-                    if mode == "id":
-                        try:
-                            content = fetch_kb_by_id(int(val))
-                        except Exception:
-                            content = f"/* 知识库未找到: id={val} */"
-                    else:
-                        content = fetch_kb_by_name(val)
-                    out_lines.append(content.strip())
-                    # 段落间空行
-                    if idx < len(placeholders):
-                        out_lines.append("")
-            # 跳过原 block
-            i = j
-            continue
-        else:
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if not re.match(r"^\s*-\s*knowledge\s*:\s*$", line, flags=re.IGNORECASE):
             out_lines.append(line)
-            i += 1
+            index += 1
+            continue
+        block_lines, next_index = _collect_knowledge_block(lines, index + 1)
+        out_lines.extend(_render_knowledge_block(svc, line, block_lines))
+        index = next_index
+    return "\n".join(out_lines)
 
-    enumerated_text = "\n".join(out_lines)
 
-    # knowledge 段之外的就地替换（若仍有占位符残留）
-    def repl_id(m: re.Match) -> str:
-        try:
-            kid = int(m.group(1))
-        except Exception:
-            return f"/* 知识库未找到: id={m.group(1)} */"
-        return fetch_kb_by_id(kid)
+def _collect_knowledge_block(lines: list[str], start: int) -> tuple[list[str], int]:
+    index = start
+    block_lines: list[str] = []
+    while index < len(lines) and not re.match(r"^\s*-\s*\w", lines[index]):
+        block_lines.append(lines[index])
+        index += 1
+    return block_lines, index
 
-    def repl_name(m: re.Match) -> str:
-        name = m.group(1).strip().strip('\"\'')
-        return fetch_kb_by_name(name)
 
-    result = _KB_ID_PATTERN.sub(repl_id, enumerated_text)
-    result = _KB_NAME_PATTERN.sub(repl_name, result)
-    return result 
+def _render_knowledge_block(svc: Any, line: str, block_lines: list[str]) -> list[str]:
+    placeholders = _extract_placeholders(block_lines)
+    if not placeholders:
+        rendered = [line, *block_lines]
+        injectable_block = svc.render_injectable_block()
+        if injectable_block:
+            rendered.extend(["", injectable_block])
+        return rendered
+    return _render_placeholder_items(svc, line, placeholders)
+
+
+def _extract_placeholders(block_lines: list[str]) -> list[tuple[str, str]]:
+    placeholders: list[tuple[str, str]] = []
+    for line in block_lines:
+        placeholders.extend(("id", match.group(1)) for match in _KB_ID_PATTERN.finditer(line))
+        placeholders.extend(_name_placeholder(match) for match in _KB_NAME_PATTERN.finditer(line))
+    return placeholders
+
+
+def _name_placeholder(match: re.Match) -> tuple[str, str]:
+    return "name", match.group(1).strip().strip('\"\'')
+
+
+def _render_placeholder_items(svc: Any, line: str, placeholders: list[tuple[str, str]]) -> list[str]:
+    out_lines = [line]
+    for idx, (mode, value) in enumerate(placeholders, start=1):
+        out_lines.append(f"{idx}.")
+        out_lines.append(_fetch_knowledge_content(svc, mode, value).strip())
+        if idx < len(placeholders):
+            out_lines.append("")
+    return out_lines
+
+
+def _replace_inline_knowledge(svc: Any, text: str) -> str:
+    result = _KB_ID_PATTERN.sub(lambda match: _fetch_knowledge_content(svc, "id", match.group(1)), text)
+    return _KB_NAME_PATTERN.sub(lambda match: _fetch_knowledge_content(svc, "name", _name_placeholder(match)[1]), result)
+
+
+def _fetch_knowledge_content(svc: Any, mode: str, value: str) -> str:
+    kb = svc.get_by_id(int(value)) if mode == "id" else svc.get_by_name(value)
+    if not kb or not kb.content:
+        return f"/* 知识库未找到: {mode}={value} */"
+    return kb.content

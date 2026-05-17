@@ -8,9 +8,11 @@ from sqlmodel import Session
 
 from app.schemas.ai import ContinuationRequest
 from app.services.context_service import ContextAssembleParams, assemble_context
+from app.services.knowledge_service import KnowledgeService
 
 
 _FACTS_SECTION_PATTERN = re.compile(r"【事实子图】\n.*?(?=(?:\n\n【)|\Z)", flags=re.S)
+_KNOWLEDGE_SECTION_PATTERN = re.compile(r"【知识文档】\n.*?(?=(?:\n\n【)|\Z)", flags=re.S)
 
 
 def _normalize_participants(participants: List[str] | None) -> List[str]:
@@ -40,6 +42,18 @@ def _merge_facts_into_context(context_info: str | None, facts_subgraph: str | No
     if _FACTS_SECTION_PATTERN.search(raw_context):
         return _FACTS_SECTION_PATTERN.sub(facts_block, raw_context, count=1)
     return f"{raw_context}\n\n{facts_block}"
+
+
+def _merge_knowledge_into_context(session: Session, context_info: str | None) -> str:
+    raw_context = (context_info or "").strip()
+    knowledge_block = KnowledgeService(session).render_injectable_block().strip()
+    if not knowledge_block:
+        return raw_context
+    if not raw_context:
+        return knowledge_block
+    if _KNOWLEDGE_SECTION_PATTERN.search(raw_context):
+        return _KNOWLEDGE_SECTION_PATTERN.sub(knowledge_block, raw_context, count=1)
+    return f"{raw_context}\n\n{knowledge_block}"
 
 
 def _to_dict(value: Any) -> Dict[str, Any]:
@@ -125,14 +139,15 @@ def _format_facts_structured(facts_structured: Any) -> str:
 def enrich_continuation_context_info(session: Session, request: ContinuationRequest) -> str:
     """服务端自动组装事实子图，并合并到续写上下文。"""
     participants = _normalize_participants(request.participants)
+    context_with_knowledge = _merge_knowledge_into_context(session, request.context_info)
 
     if not request.project_id:
         logger.debug("[续写上下文] project_id 为空，跳过事实子图自动组装")
-        return (request.context_info or "").strip()
+        return context_with_knowledge
 
     if not participants:
         logger.debug("[续写上下文] participants 为空，跳过事实子图自动组装")
-        return (request.context_info or "").strip()
+        return context_with_knowledge
 
     try:
         assembled = assemble_context(
@@ -148,11 +163,11 @@ def enrich_continuation_context_info(session: Session, request: ContinuationRequ
         )
     except Exception as exc:
         logger.warning("[续写上下文] 自动组装事实子图失败: {}", exc)
-        return (request.context_info or "").strip()
+        return context_with_knowledge
 
     structured_facts = _format_facts_structured(assembled.facts_structured)
     merged_context = _merge_facts_into_context(
-        request.context_info,
+        context_with_knowledge,
         structured_facts or assembled.facts_subgraph,
     )
     logger.debug(

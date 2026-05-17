@@ -50,11 +50,18 @@ def init_knowledge(session: Session) -> None:
                 kb.content = content
                 kb.description = description
                 kb.built_in = True
+                kb.knowledge_type = "reference"
                 updated += 1
             else:
                 skipped += 1
         else:
-            session.add(Knowledge(name=name, description=description, content=content, built_in=True))
+            session.add(Knowledge(
+                name=name,
+                description=description,
+                content=content,
+                built_in=True,
+                knowledge_type="reference",
+            ))
             created += 1
 
     if created or updated:

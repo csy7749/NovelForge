@@ -161,6 +161,27 @@ class Knowledge(SQLModel, table=True):
     description: Optional[str] = None
     content: str
     built_in: bool = Field(default=False)
+    knowledge_type: str = Field(
+        default="reference",
+        sa_column=Column(sa.String, nullable=False, server_default="reference", index=True),
+    )
+    summary: Optional[str] = None
+    summary_enabled: bool = Field(
+        default=False,
+        sa_column=Column(sa.Boolean, nullable=False, server_default=sa.false()),
+    )
+    is_injectable: bool = Field(
+        default=False,
+        sa_column=Column(sa.Boolean, nullable=False, server_default=sa.false(), index=True),
+    )
+    injection_mode: str = Field(
+        default="none",
+        sa_column=Column(sa.String, nullable=False, server_default="none"),
+    )
+    injection_config: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    source: Optional[str] = None
+    maintenance_notes: Optional[str] = None
+    updated_at: Optional[datetime] = None
 
 
 # 工作流系统

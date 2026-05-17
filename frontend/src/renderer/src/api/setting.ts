@@ -1,14 +1,48 @@
 import request from './request'
 import type { components } from '@renderer/types/generated'
 
-export type Knowledge = components['schemas']['KnowledgeRead']
-export type KnowledgeCreate = components['schemas']['KnowledgeCreate']
-export type KnowledgeUpdate = components['schemas']['KnowledgeUpdate']
+export type KnowledgeType = 'design' | 'memory' | 'skill' | 'reference'
+export type InjectionMode = 'none' | 'full' | 'summary'
+
+export interface Knowledge {
+  id: number
+  name: string
+  description?: string | null
+  content: string
+  built_in: boolean
+  knowledge_type: KnowledgeType
+  summary?: string | null
+  summary_enabled: boolean
+  is_injectable: boolean
+  injection_mode: InjectionMode
+  injection_config?: Record<string, unknown> | null
+  source?: string | null
+  maintenance_notes?: string | null
+}
+
+export type KnowledgeCreate = Omit<Knowledge, 'id' | 'built_in'>
+export type KnowledgeUpdate = Partial<KnowledgeCreate>
+
+export interface KnowledgeListParams {
+  knowledge_type?: KnowledgeType
+  query?: string
+  is_injectable?: boolean
+}
+
+export interface KnowledgeMetadata {
+  knowledge_types: KnowledgeType[]
+  injection_modes: InjectionMode[]
+  retrieval_backends: string[]
+}
 
 // 知识库 API（request 已解包 ApiResponse<T>，此处直接返回 T）
-export async function listKnowledge(): Promise<Knowledge[]> {
-  const resp = await request.get<Knowledge[]>('/knowledge')
+export async function listKnowledge(params?: KnowledgeListParams): Promise<Knowledge[]> {
+  const resp = await request.get<Knowledge[]>('/knowledge', params)
   return resp
+}
+
+export async function getKnowledgeMetadata(): Promise<KnowledgeMetadata> {
+  return await request.get<KnowledgeMetadata>('/knowledge/meta')
 }
 
 export async function createKnowledge(body: KnowledgeCreate): Promise<Knowledge> {
