@@ -99,6 +99,9 @@
       v-model="openDrawer"
       :context-templates="localAiContextTemplates"
       v-model:active-context-template-kind="activeContextTemplateKind"
+      :cards="cards"
+      :current-card="currentCardForContext"
+      :assembled-context="props.prefetched"
       :preview-text="previewText"
       @apply-context="applyContextTemplateAndSave"
       @open-selector="openSelectorFromDrawer"
@@ -311,8 +314,18 @@ function getResolvedContextByKind(kind: ContextTemplateKind | string | null | un
   const editingContent = currentContent ?? (wrapperName.value ? innerData.value : localData.value)
   const currentCardForResolve = { ...props.card, content: editingContent }
   const template = getContextTemplateByKind(props.card, localAiContextTemplates.value, kind, 'generation')
-  return resolveTemplate({ template, cards: cards.value, currentCard: currentCardForResolve as any })
+  return resolveTemplate({
+    template,
+    cards: cards.value,
+    currentCard: currentCardForResolve as any,
+    assembledContext: props.prefetched || null,
+  })
 }
+
+const currentCardForContext = computed(() => ({
+  ...props.card,
+  content: wrapperName.value ? innerData.value : localData.value,
+}))
 
 function handleGenerationContextKindChange(kind: ContextTemplateKind | string) {
   generationContextKind.value = normalizeContextTemplateKind(kind, 'generation')

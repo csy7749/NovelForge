@@ -46,10 +46,27 @@ class FactsStructured(BaseModel):
 	concept_summaries: List[ConceptSummary] = Field(default_factory=list, description="概念摘要")
 
 
+class ContextTraceSource(BaseModel):
+	kind: str = Field(..., description="来源类别")
+	label: str = Field(..., description="用户可读标签")
+	source_ref: Optional[str] = Field(default=None, description="来源对象标识")
+	preview: str = Field(default="", description="来源内容预览")
+	count: int = Field(default=1, description="命中数量")
+	truncated: bool = Field(default=False, description="是否已截断")
+
+
+class ContextVisualizationTrace(BaseModel):
+	status: str = Field(default="ok", description="装配状态：ok/partial/empty/error")
+	sources: List[ContextTraceSource] = Field(default_factory=list, description="上下文来源明细")
+	empty_sources: List[str] = Field(default_factory=list, description="明确未命中的来源类别")
+	errors: List[str] = Field(default_factory=list, description="装配错误")
+
+
 class AssembleContextResponse(BaseModel):
 	facts_subgraph: str = Field(default="", description="事实子图的文本回显（可选，仅回显）")
 	budget_stats: Dict[str, Any] = Field(default_factory=dict, description="上下文字数预算统计（可能包含嵌套 parts dict）")
 	facts_structured: Optional[FactsStructured] = Field(default=None, description="结构化事实子图")
+	trace: Optional[ContextVisualizationTrace] = Field(default=None, description="上下文可视化 trace 元数据")
 
 
 class ContextSettingsModel(BaseModel):

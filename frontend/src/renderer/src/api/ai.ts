@@ -78,8 +78,25 @@ export type ItemSummary = components['schemas']['ItemSummary']
 export type ConceptSummary = components['schemas']['ConceptSummary']
 export type FactsStructuredExtended = NonNullable<AssembleContextResponseBase['facts_structured']>
 
+export interface ContextTraceSource {
+  kind: string
+  label: string
+  source_ref?: string | null
+  preview: string
+  count: number
+  truncated: boolean
+}
+
+export interface ContextVisualizationTrace {
+  status: 'ok' | 'partial' | 'empty' | 'error' | string
+  sources: ContextTraceSource[]
+  empty_sources: string[]
+  errors: string[]
+}
+
 export type AssembleContextResponse = Omit<AssembleContextResponseBase, 'facts_structured'> & {
   facts_structured?: FactsStructuredExtended | null
+  trace?: ContextVisualizationTrace | null
 }
 
 export function renderPromptWithKnowledge(name: string): Promise<{ text: string }> {

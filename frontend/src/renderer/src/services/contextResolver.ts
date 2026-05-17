@@ -17,6 +17,24 @@ export interface ResolveContext {
   assembledContext?: AssembleContextResponse | null
 }
 
+export interface TemplateToken {
+  start: number
+  end: number
+  raw: string
+}
+
+export interface ResolvedTemplateToken extends TemplateToken {
+  token: string
+  value: string
+  resolved: boolean
+}
+
+export interface ResolveTemplateDetails {
+  template: string
+  result: string
+  tokens: ResolvedTemplateToken[]
+}
+
 // 构建树并输出先序顺序（按每层 display_order 排序），用于“全局之前”判定
 function buildPreorder(cards: CardRead[]): CardRead[] {
   type Node = CardRead & { children: Node[] }
@@ -711,13 +729,9 @@ function resolveToken(rawToken: string, ctx: ResolveContext, vars: ResolveVars):
   return `[Error: Invalid reference '${rawToken}']`
 }
 
-export function resolveTemplate(ctx: ResolveContext): string {
-  const vars = buildVars(ctx)
-  const { template } = ctx
-  if (!template) return ''
-
-  const s = template
-  const tokens: { start: number; end: number; raw: string }[] = []
+export function scanTemplateTokens(template: string): TemplateToken[] {
+  const s = template || ''
+  const tokens: TemplateToken[] = []
   const n = s.length
   let i = 0
   while (i < n) {
@@ -737,7 +751,7 @@ export function resolveTemplate(ctx: ResolveContext): string {
         continue
       }
       if (ch === '"' || ch === "'") {
-        quote = ch as any
+        quote = ch
         j++
         continue
       }
@@ -753,13 +767,39 @@ export function resolveTemplate(ctx: ResolveContext): string {
     tokens.push({ start: at, end: j, raw })
     i = j + 1
   }
+  return tokens
+}
+
+function isResolvedTokenValue(value: string): boolean {
+  const trimmed = String(value || '').trim()
+  return trimmed.length > 0 && !trimmed.startsWith('[Error:')
+}
+
+export function resolveTemplateDetails(ctx: ResolveContext): ResolveTemplateDetails {
+  const vars = buildVars(ctx)
+  const { template } = ctx
+  if (!template) return { template: '', result: '', tokens: [] }
+
+  const s = template
+  const tokens = scanTemplateTokens(s)
+  const resolvedTokens: ResolvedTemplateToken[] = []
 
   // 反向替换（仅使用内置解析，不支持跨项目 @）
   let result = s
   for (let k = tokens.length - 1; k >= 0; k--) {
     const t = tokens[k]
     const replacement = resolveToken(t.raw, ctx, vars)
+    resolvedTokens.unshift({
+      ...t,
+      token: t.raw.replace(/^@/, ''),
+      value: replacement,
+      resolved: isResolvedTokenValue(replacement),
+    })
     result = result.slice(0, t.start) + replacement + result.slice(t.end)
   }
-  return result
+  return { template: s, result, tokens: resolvedTokens }
+}
+
+export function resolveTemplate(ctx: ResolveContext): string {
+  return resolveTemplateDetails(ctx).result
 } 

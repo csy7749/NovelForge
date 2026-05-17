@@ -11,6 +11,9 @@ from app.schemas.relation_extract import CN_TO_EN_KIND
 from app.services.kg_provider import get_provider
 from app.utils.text_utils import truncate_text
 
+FACTS_QUOTA_CHARS = 5000
+TRACE_PREVIEW_CHARS = 180
+
 
 @dataclass
 class ContextAssembleParams:
@@ -28,6 +31,7 @@ class AssembledContext:
 	facts_subgraph: str
 	budget_stats: Dict[str, Any]
 	facts_structured: Optional[Dict[str, Any]] = None
+	trace: Optional[Dict[str, Any]] = None
 
 	def to_system_prompt_block(self) -> str:
 		parts: List[str] = []
@@ -55,6 +59,128 @@ def _clean_list(value: Any) -> List[str]:
 		if text:
 			items.append(text)
 	return items
+
+
+def _preview(value: Any) -> str:
+	text = _clean_text(value)
+	if not text:
+		return ""
+	return truncate_text(text, TRACE_PREVIEW_CHARS, suffix="...")
+
+
+def _trace_source(
+	kind: str,
+	label: str,
+	source_ref: Optional[str],
+	preview: str,
+	count: int = 1,
+	truncated: bool = False,
+) -> Dict[str, Any]:
+	return {
+		"kind": kind,
+		"label": label,
+		"source_ref": source_ref,
+		"preview": _preview(preview),
+		"count": count,
+		"truncated": truncated,
+	}
+
+
+def _relation_preview(item: Dict[str, Any]) -> str:
+	parts = [
+		_clean_text(item.get("a")),
+		_clean_text(item.get("kind")) or "关系",
+		_clean_text(item.get("b")),
+	]
+	description = _clean_text(item.get("description"))
+	if description:
+		parts.append(description)
+	return " / ".join(part for part in parts if part)
+
+
+def _entity_summary_preview(item: Dict[str, Any]) -> str:
+	parts = [
+		_clean_text(item.get("description")),
+		_clean_text(item.get("current_state")),
+		_clean_text(item.get("rule_definition")),
+	]
+	events = item.get("important_events")
+	if isinstance(events, list) and events:
+		parts.append("；".join(_clean_text(event) for event in events if _clean_text(event)))
+	return "；".join(part for part in parts if part)
+
+
+def _build_fact_trace_sources(structured: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+	if not structured:
+		return []
+	sources: List[Dict[str, Any]] = []
+	for index, fact in enumerate(structured.get("fact_summaries") or [], start=1):
+		sources.append(_trace_source("fact_summary", f"关键事实 {index}", f"fact:{index}", str(fact)))
+	for index, item in enumerate(structured.get("relation_summaries") or [], start=1):
+		if isinstance(item, dict):
+			label = f"{_clean_text(item.get('a'))} ↔ {_clean_text(item.get('b'))}"
+			sources.append(_trace_source("facts_relation", label, f"relation:{index}", _relation_preview(item)))
+	for item in structured.get("item_summaries") or []:
+		if isinstance(item, dict):
+			name = _clean_text(item.get("name")) or "未命名物品"
+			sources.append(_trace_source("item_summary", name, f"item:{name}", _entity_summary_preview(item)))
+	for item in structured.get("concept_summaries") or []:
+		if isinstance(item, dict):
+			name = _clean_text(item.get("name")) or "未命名概念"
+			sources.append(_trace_source("concept_summary", name, f"concept:{name}", _entity_summary_preview(item)))
+	return sources
+
+
+def _empty_source_labels(participants: List[str], structured: Optional[Dict[str, Any]]) -> List[str]:
+	labels: List[str] = []
+	if not participants:
+		labels.append("participants")
+	if not structured:
+		return labels + ["facts_structured"]
+	for key in ("fact_summaries", "relation_summaries", "item_summaries", "concept_summaries"):
+		if not structured.get(key):
+			labels.append(key)
+	return labels
+
+
+def _trace_status(
+	sources: List[Dict[str, Any]],
+	empty_sources: List[str],
+	errors: List[str],
+) -> str:
+	if errors and not sources:
+		return "error"
+	if errors:
+		return "partial"
+	if not sources or empty_sources:
+		return "empty" if not sources else "partial"
+	return "ok"
+
+
+def _build_trace(
+	structured: Optional[Dict[str, Any]],
+	facts_text: str,
+	facts: str,
+	participants: List[str],
+	errors: List[str],
+) -> Dict[str, Any]:
+	sources = _build_fact_trace_sources(structured)
+	if facts:
+		sources.insert(0, _trace_source(
+			"facts_subgraph",
+			"事实子图文本",
+			"facts_subgraph",
+			facts,
+			max(1, len(sources)),
+			facts != facts_text,
+		))
+	empty_sources = _empty_source_labels(participants, structured)
+	return {
+		"status": _trace_status(sources, empty_sources, errors),
+		"sources": sources,
+		"empty_sources": empty_sources,
+		"errors": errors,
+	}
 
 
 def _card_entity_type(card: Card) -> str:
@@ -147,10 +273,11 @@ def _build_concept_summaries(session: Session, project_id: Optional[int], partic
 
 
 def assemble_context(session: Session, params: ContextAssembleParams) -> AssembledContext:
-	facts_quota = 5000
+	facts_quota = FACTS_QUOTA_CHARS
 
 	eff_participants: List[str] = list(params.participants or [])
 	participant_set = {name for name in eff_participants if name}
+	trace_errors: List[str] = []
 
 	facts_text = _compose_facts_subgraph_stub()
 	facts_structured: Optional[Dict[str, Any]] = None
@@ -216,7 +343,8 @@ def assemble_context(session: Session, params: ContextAssembleParams) -> Assembl
 				"item_summaries": item_summaries,
 				"concept_summaries": concept_summaries,
 			}
-	except Exception:
+	except Exception as exc:
+		trace_errors.append(f"知识图谱查询失败: {type(exc).__name__}: {exc}")
 		if item_summaries or concept_summaries:
 			facts_structured = {
 				"fact_summaries": [],
@@ -226,9 +354,11 @@ def assemble_context(session: Session, params: ContextAssembleParams) -> Assembl
 			}
 
 	facts = truncate_text(facts_text, facts_quota, suffix="\n...[已截断]")
+	trace = _build_trace(facts_structured, facts_text, facts, eff_participants, trace_errors)
 
 	return AssembledContext(
 		facts_subgraph=facts,
 		budget_stats={},
 		facts_structured=facts_structured,
+		trace=trace,
 	)
