@@ -12,10 +12,11 @@ from ..base import BaseNode
 from app.services.ai.core.chat_model_factory import build_chat_model
 from app.services.ai.core.agent_builder import build_agent
 from app.services.ai.assistant.tools import (
-    ASSISTANT_TOOL_REGISTRY,
     AssistantDeps,
+    get_assistant_tool_registry,
     set_assistant_deps,
 )
+from app.services.ai.core.tool_pipeline import TOOL_CALLER_WORKFLOW_NODE
 
 
 # ============================================================
@@ -90,13 +91,17 @@ class AgentNode(BaseNode[AgentInput, AgentOutput]):
         )
         
         # 筛选工具
+        tool_registry = get_assistant_tool_registry(
+            caller=TOOL_CALLER_WORKFLOW_NODE,
+            allowed_tool_names=input_data.tools,
+        )
         selected_tools = []
         for tool_name in input_data.tools:
-            tool = ASSISTANT_TOOL_REGISTRY.get(tool_name)
+            tool = tool_registry.get(tool_name)
             if tool:
                 selected_tools.append(tool)
-            else:
-                logger.warning(f"[AI.Agent] 未找到工具: {tool_name}")
+                continue
+            logger.warning(f"[AI.Agent] 未找到或未授权工具: {tool_name}")
         
         if not selected_tools:
             logger.warning("[AI.Agent] 未选择任何工具，将使用纯文本模式")

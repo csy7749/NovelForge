@@ -11,6 +11,7 @@ from sqlmodel import Session
 
 from app.services.ai.core.chat_model_factory import build_chat_model
 from app.services.ai.core.quota_manager import precheck_quota, record_usage
+from app.services.ai.core.tool_pipeline import build_tool_end_event, build_tool_start_event
 from app.services.ai.core.token_utils import calc_input_tokens, estimate_tokens
 
 try:
@@ -535,10 +536,12 @@ async def stream_chat_with_react_protocol(
             action_payload = _parse_action_payload(step_text)
             if action_payload:
                 tool_name, tool_args = action_payload
-                yield {
-                    "type": "tool_start",
-                    "data": {"tool_name": tool_name, "args": tool_args},
-                }
+                tool = tool_registry.get(tool_name)
+                yield build_tool_start_event(
+                    tool_name=tool_name,
+                    args=tool_args,
+                    tool=tool,
+                )
 
                 success = True
                 try:
@@ -552,15 +555,14 @@ async def stream_chat_with_react_protocol(
                     success = False
                     tool_result = {"success": False, "error": str(tool_err)}
 
-                yield {
-                    "type": "tool_end",
-                    "data": {
-                        "tool_name": tool_name,
-                        "args": tool_args,
-                        "result": tool_result,
-                        "success": success,
-                    },
-                }
+                end_event = build_tool_end_event(
+                    tool_name=tool_name,
+                    args=tool_args,
+                    result=tool_result,
+                    tool=tool,
+                )
+                end_event["data"]["success"] = bool(end_event["data"].get("success")) and success
+                yield end_event
 
                 messages.append(
                     HumanMessage(

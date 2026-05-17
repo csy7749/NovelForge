@@ -291,7 +291,7 @@ async function submitSelectedSuggestions() {
   if (!props.projectId || !props.activeCard) return
 
   try {
-    const items = selectedSuggestions.value.map(text => ({
+    const items: Parameters<typeof registerForeshadow>[1] = selectedSuggestions.value.map(text => ({
       title: text,
       type: suggestionTypeMap.value.get(text) || 'other',
       chapter_id: props.activeCard!.id

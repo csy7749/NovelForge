@@ -22,6 +22,12 @@ from app.schemas.tool_result import (
     CardOperationResult,
     to_dict
 )
+from app.services.ai.core.tool_pipeline import (
+    AI_TOOL_REGISTRY,
+    TOOL_CALLER_ASSISTANT,
+    TOOL_CALLER_WORKFLOW_NODE,
+    ToolExecutionContext,
+)
 import copy
 
 REVIEW_RESULT_CARD_TYPE_NAME = "内容审核卡片"
@@ -1099,8 +1105,8 @@ def move_card(
         return to_dict(result)
 
 
-# 导出所有 LangChain 工具（已通过 @tool 装饰）
-ASSISTANT_TOOLS = [
+# 导出所有 LangChain 原始工具（已通过 @tool 装饰），统一管线以此作为兼容执行绑定。
+ASSISTANT_LEGACY_TOOLS = [
     search_cards,
     create_card,
     update_card,
@@ -1115,12 +1121,76 @@ ASSISTANT_TOOLS = [
     get_card_content,
 ]
 
-ASSISTANT_TOOL_REGISTRY = {tool.name: tool for tool in ASSISTANT_TOOLS}
-
-ASSISTANT_TOOL_DESCRIPTIONS = {
-    tool.name: {
-        "description": tool.description,
-        "args": tool.args,
-    }
-    for tool in ASSISTANT_TOOLS
+ASSISTANT_WRITE_TOOL_NAMES = {
+    "create_card",
+    "update_card",
+    "modify_card_field",
+    "delete_card",
+    "move_card",
+    "replace_card_text_by_lines",
+    "replace_field_text",
 }
+
+ASSISTANT_CONFIRMATION_TOOL_NAMES = {"delete_card", "move_card"}
+
+
+def _assistant_tool_risk_level(tool_name: str) -> str:
+    if tool_name in ASSISTANT_CONFIRMATION_TOOL_NAMES:
+        return "high"
+    if tool_name in ASSISTANT_WRITE_TOOL_NAMES:
+        return "medium"
+    return "low"
+
+
+def _register_assistant_tools() -> None:
+    for item in ASSISTANT_LEGACY_TOOLS:
+        AI_TOOL_REGISTRY.register_legacy_tool(
+            tool=item,
+            namespace="assistant",
+            allowed_callers=(TOOL_CALLER_ASSISTANT, TOOL_CALLER_WORKFLOW_NODE),
+            risk_level=_assistant_tool_risk_level(item.name),
+            requires_confirmation=item.name in ASSISTANT_CONFIRMATION_TOOL_NAMES,
+            tags=("assistant",),
+        )
+
+
+def get_assistant_tools(
+    caller: str = TOOL_CALLER_ASSISTANT,
+    allowed_tool_names: Optional[List[str]] = None,
+):
+    allowed = frozenset(allowed_tool_names) if allowed_tool_names is not None else None
+    return AI_TOOL_REGISTRY.get_tools(
+        context=ToolExecutionContext(caller=caller, allowed_tool_names=allowed),
+        namespace="assistant",
+    )
+
+
+def get_assistant_tool_registry(
+    caller: str = TOOL_CALLER_ASSISTANT,
+    allowed_tool_names: Optional[List[str]] = None,
+):
+    allowed = frozenset(allowed_tool_names) if allowed_tool_names is not None else None
+    return AI_TOOL_REGISTRY.get_tool_map(
+        context=ToolExecutionContext(caller=caller, allowed_tool_names=allowed),
+        namespace="assistant",
+    )
+
+
+def get_assistant_tool_descriptions(
+    caller: str = TOOL_CALLER_ASSISTANT,
+    allowed_tool_names: Optional[List[str]] = None,
+):
+    allowed = frozenset(allowed_tool_names) if allowed_tool_names is not None else None
+    return AI_TOOL_REGISTRY.get_tool_descriptions(
+        context=ToolExecutionContext(caller=caller, allowed_tool_names=allowed),
+        namespace="assistant",
+    )
+
+
+_register_assistant_tools()
+
+ASSISTANT_TOOLS = get_assistant_tools()
+
+ASSISTANT_TOOL_REGISTRY = get_assistant_tool_registry()
+
+ASSISTANT_TOOL_DESCRIPTIONS = get_assistant_tool_descriptions()

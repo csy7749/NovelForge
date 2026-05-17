@@ -16,6 +16,11 @@ from app.services.ai.card_type_schema import (
 )
 from app.schemas.response_registry import RESPONSE_MODEL_MAP
 from app.schemas.workflow_agent import WorkflowPatchOp
+from app.services.ai.core.tool_pipeline import (
+    AI_TOOL_REGISTRY,
+    TOOL_CALLER_WORKFLOW_AGENT,
+    ToolExecutionContext,
+)
 from app.services.workflow import get_all_node_metadata
 from app.services.workflow.patcher import (
     compute_code_revision,
@@ -486,7 +491,7 @@ def wf_get_card_type_schema(card_type: str) -> Dict[str, Any]:
     )
 
 
-WORKFLOW_AGENT_TOOLS = [
+WORKFLOW_AGENT_LEGACY_TOOLS = [
     wf_get_current_code,
     wf_parse_code,
     wf_validate_code,
@@ -500,13 +505,49 @@ WORKFLOW_AGENT_TOOLS = [
 ]
 
 
-WORKFLOW_AGENT_TOOL_REGISTRY = {tool.name: tool for tool in WORKFLOW_AGENT_TOOLS}
+WORKFLOW_AGENT_WRITE_TOOL_NAMES = {"wf_replace_code", "wf_apply_patch"}
 
 
-WORKFLOW_AGENT_TOOL_DESCRIPTIONS = {
-    tool.name: {"description": tool.description, "args": tool.args}
-    for tool in WORKFLOW_AGENT_TOOLS
-}
+def _register_workflow_agent_tools() -> None:
+    for item in WORKFLOW_AGENT_LEGACY_TOOLS:
+        AI_TOOL_REGISTRY.register_legacy_tool(
+            tool=item,
+            namespace="workflow_agent",
+            allowed_callers=(TOOL_CALLER_WORKFLOW_AGENT,),
+            risk_level="medium" if item.name in WORKFLOW_AGENT_WRITE_TOOL_NAMES else "low",
+            requires_confirmation=False,
+            tags=("workflow_agent",),
+        )
+
+
+def get_workflow_agent_tools():
+    return AI_TOOL_REGISTRY.get_tools(
+        context=ToolExecutionContext(caller=TOOL_CALLER_WORKFLOW_AGENT),
+        namespace="workflow_agent",
+    )
+
+
+def get_workflow_agent_tool_registry():
+    return AI_TOOL_REGISTRY.get_tool_map(
+        context=ToolExecutionContext(caller=TOOL_CALLER_WORKFLOW_AGENT),
+        namespace="workflow_agent",
+    )
+
+
+def get_workflow_agent_tool_descriptions():
+    return AI_TOOL_REGISTRY.get_tool_descriptions(
+        context=ToolExecutionContext(caller=TOOL_CALLER_WORKFLOW_AGENT),
+        namespace="workflow_agent",
+    )
+
+
+_register_workflow_agent_tools()
+
+WORKFLOW_AGENT_TOOLS = get_workflow_agent_tools()
+
+WORKFLOW_AGENT_TOOL_REGISTRY = get_workflow_agent_tool_registry()
+
+WORKFLOW_AGENT_TOOL_DESCRIPTIONS = get_workflow_agent_tool_descriptions()
 
 
 def debug_tools_loaded() -> None:

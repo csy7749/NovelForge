@@ -12,6 +12,7 @@ from sqlmodel import Session
 from .agent_builder import build_agent
 from .chat_model_factory import build_chat_model
 from .quota_manager import precheck_quota, record_usage
+from .tool_pipeline import build_tool_end_event, build_tool_start_event
 from .token_utils import calc_input_tokens, estimate_tokens
 
 
@@ -68,6 +69,8 @@ async def stream_agent_with_tools(
     usage_output_tokens: Optional[int] = None
     tool_end_count = 0
     tool_end_failed_count = 0
+    pending_tool_args: dict[str, dict[str, Any]] = {}
+    pending_tool_objects = {tool.name: tool for tool in tools}
 
     initial_messages: list[dict[str, str]] = []
     for item in history_messages or []:
@@ -105,6 +108,11 @@ async def stream_agent_with_tools(
                                 else:
                                     name = getattr(tool_call, "name", "") or ""
                                     args = getattr(tool_call, "args", {}) or {}
+                                call_id = (
+                                    tool_call.get("id")
+                                    if isinstance(tool_call, dict)
+                                    else getattr(tool_call, "id", None)
+                                )
 
                                 if isinstance(args, str):
                                     try:
@@ -117,13 +125,21 @@ async def stream_agent_with_tools(
                                     except Exception:
                                         args = json.loads(json.dumps(args, ensure_ascii=False))
 
-                                yield {
-                                    "type": "tool_start",
-                                    "data": {"tool_name": name, "args": args},
-                                }
+                                call_key = str(call_id or name)
+                                pending_tool_args[call_key] = args
+
+                                yield build_tool_start_event(
+                                    tool_name=name,
+                                    args=args,
+                                    tool=pending_tool_objects.get(name),
+                                    call_id=str(call_id) if call_id else None,
+                                )
 
                         if isinstance(msg, ToolMessage):
                             tool_name = getattr(msg, "name", "") or ""
+                            tool_call_id = getattr(msg, "tool_call_id", None)
+                            call_key = str(tool_call_id or tool_name)
+                            args = pending_tool_args.pop(call_key, {})
 
                             raw_content = msg.content
                             result_obj: Any = raw_content
@@ -133,14 +149,13 @@ async def stream_agent_with_tools(
                                 except Exception:
                                     result_obj = {"raw": raw_content}
 
-                            yield {
-                                "type": "tool_end",
-                                "data": {
-                                    "tool_name": tool_name,
-                                    "args": {},
-                                    "result": result_obj,
-                                },
-                            }
+                            yield build_tool_end_event(
+                                tool_name=tool_name,
+                                args=args,
+                                result=result_obj,
+                                tool=pending_tool_objects.get(tool_name),
+                                call_id=str(tool_call_id) if tool_call_id else None,
+                            )
 
                             tool_end_count += 1
                             if isinstance(result_obj, dict) and result_obj.get("success") is False:
