@@ -17,16 +17,6 @@ env/
 backend/alembic/versions/*.py
 !backend/alembic/versions/__init__.py
 
-# 忽略所有md文档，除了README
-*.md
-!README.md
-!README.MD
-!CLA.md
-!贡献指南.md
-!后续规划.md
-!rules/**/*.md
-!rules/**/*.mdc
-
 
 primitive_models/
 docs/
