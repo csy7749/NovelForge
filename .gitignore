@@ -1,6 +1,5 @@
 # 数据库相关
-backend/*.db
-backend/**/*.db
+#backend/**/*.db
 
 # Python缓存
 **/__pycache__/
@@ -11,7 +10,6 @@ backend/**/*.db
 venv/
 env/
 .venv/
-.env/
 
 # Alembic相关
 backend/alembic/versions/*.py
@@ -38,7 +36,6 @@ docs/
 .DS_Store
 Thumbs.db
 desktop.ini
-.env
 
 # 日志文件
 *.log
