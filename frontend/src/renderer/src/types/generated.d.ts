@@ -316,6 +316,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ai/assistant/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Assistant Tools
+         * @description 返回灵感/小说 Agent 当前可用工具清单。
+         */
+        get: operations["assistant_tools_api_ai_assistant_tools_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ai/assistant/chat": {
         parameters: {
             query?: never;
@@ -1195,6 +1215,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/knowledge/meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取知识系统元信息 */
+        get: operations["get_knowledge_metadata_api_knowledge_meta_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/knowledge/": {
         parameters: {
             query?: never;
@@ -1207,6 +1244,23 @@ export interface paths {
         put?: never;
         /** 创建知识库 */
         post: operations["create_knowledge_api_knowledge__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/knowledge/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 检索知识文档 */
+        get: operations["search_knowledge_api_knowledge_search_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1227,6 +1281,58 @@ export interface paths {
         post?: never;
         /** 删除知识库 */
         delete: operations["delete_knowledge_api_knowledge__kid__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ai-traces/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Trace Runs */
+        get: operations["list_trace_runs_api_ai_traces_runs_get"];
+        put?: never;
+        /** Create Trace Run */
+        post: operations["create_trace_run_api_ai_traces_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ai-traces/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Trace Run */
+        get: operations["get_trace_run_api_ai_traces_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ai-traces/runs/{run_id}/steps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Trace Steps */
+        get: operations["list_trace_steps_api_ai_traces_runs__run_id__steps_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1514,7 +1620,7 @@ export interface paths {
          * Pause Run
          * @description 暂停运行中的工作流
          *
-         *     立即取消所有异步任务并更新数据库状态。
+         *     通过共享运行时请求暂停，并更新数据库状态。
          */
         post: operations["pause_run_api_workflows_runs__run_id__pause_post"];
         delete?: never;
@@ -1762,6 +1868,29 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AgentResult */
+        AgentResult: {
+            /** Task Id */
+            task_id: string;
+            /** Source Agent Id */
+            source_agent_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "succeeded" | "failed" | "blocked";
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+            /** Error */
+            error?: string | null;
+        };
         /** ApiResponse */
         ApiResponse: {
             /**
@@ -1782,6 +1911,17 @@ export interface components {
              */
             status: string;
             data?: components["schemas"]["ContinuationResponse"] | null;
+            /** Message */
+            message?: string | null;
+        };
+        /** ApiResponse[KnowledgeMetadata] */
+        ApiResponse_KnowledgeMetadata_: {
+            /**
+             * Status
+             * @default success
+             */
+            status: string;
+            data?: components["schemas"]["KnowledgeMetadata"] | null;
             /** Message */
             message?: string | null;
         };
@@ -2039,6 +2179,8 @@ export interface components {
             };
             /** @description 结构化事实子图 */
             facts_structured?: components["schemas"]["FactsStructured"] | null;
+            /** @description 上下文可视化 trace 元数据 */
+            trace?: components["schemas"]["ContextVisualizationTrace"] | null;
         };
         /**
          * AssistantChatRequest
@@ -2061,6 +2203,11 @@ export interface components {
              * @description 项目ID（用于工具调用作用域）
              */
             project_id: number;
+            /**
+             * Card Id
+             * @description 当前卡片ID（用于关联执行痕迹）
+             */
+            card_id?: number | null;
             /**
              * Llm Config Id
              * @description LLM配置ID
@@ -2113,6 +2260,73 @@ export interface components {
              * @description 是否启用 React 文本协议工具调用模式
              */
             react_mode_enabled?: boolean | null;
+            /**
+             * Multi Agent Enabled
+             * @description 是否启用多 agent 编排路由
+             */
+            multi_agent_enabled?: boolean | null;
+            /**
+             * Agent Task Type
+             * @description 多 agent 路由任务类型，例如 writing/review/memory_extraction
+             */
+            agent_task_type?: string | null;
+            /**
+             * Agent Requested Tools
+             * @description 本次委派允许暴露给目标 agent 的工具名
+             */
+            agent_requested_tools?: string[] | null;
+        };
+        /**
+         * AssistantToolMetadata
+         * @description 灵感助手可用工具元信息。
+         */
+        AssistantToolMetadata: {
+            /**
+             * Name
+             * @description 工具名称
+             */
+            name: string;
+            /**
+             * Description
+             * @description 工具说明
+             * @default
+             */
+            description: string;
+            /**
+             * Namespace
+             * @description 工具命名空间
+             */
+            namespace: string;
+            /**
+             * Args Schema
+             * @description 工具参数 JSON Schema
+             */
+            args_schema?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Risk Level
+             * @description 风险等级：low / medium / high
+             * @default low
+             */
+            risk_level: string;
+            /**
+             * Requires Confirmation
+             * @description 是否需要用户确认
+             * @default false
+             */
+            requires_confirmation: boolean;
+            /**
+             * Source
+             * @description 工具来源
+             * @default native
+             */
+            source: string;
+            /**
+             * Tags
+             * @description 工具标签
+             */
+            tags?: string[];
         };
         /** CancelResponse */
         CancelResponse: {
@@ -2446,6 +2660,66 @@ export interface components {
              */
             counter_relations?: string[];
         };
+        /** ContextTraceSource */
+        ContextTraceSource: {
+            /**
+             * Kind
+             * @description 来源类别
+             */
+            kind: string;
+            /**
+             * Label
+             * @description 用户可读标签
+             */
+            label: string;
+            /**
+             * Source Ref
+             * @description 来源对象标识
+             */
+            source_ref?: string | null;
+            /**
+             * Preview
+             * @description 来源内容预览
+             * @default
+             */
+            preview: string;
+            /**
+             * Count
+             * @description 命中数量
+             * @default 1
+             */
+            count: number;
+            /**
+             * Truncated
+             * @description 是否已截断
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /** ContextVisualizationTrace */
+        ContextVisualizationTrace: {
+            /**
+             * Status
+             * @description 装配状态：ok/partial/empty/error
+             * @default ok
+             */
+            status: string;
+            /**
+             * Sources
+             * @description 上下文来源明细
+             */
+            sources?: components["schemas"]["ContextTraceSource"][];
+            /**
+             * Empty Sources
+             * @description 明确未命中的来源类别
+             */
+            empty_sources?: string[];
+            /**
+             * Errors
+             * @description 装配错误
+             */
+            errors?: string[];
+        };
         /** ContinuationRequest */
         ContinuationRequest: {
             /**
@@ -2463,6 +2737,8 @@ export interface components {
             stream: boolean;
             /** Project Id */
             project_id?: number | null;
+            /** Card Id */
+            card_id?: number | null;
             /** Volume Number */
             volume_number?: number | null;
             /** Chapter Number */
@@ -2668,6 +2944,7 @@ export interface components {
             affected_targets?: {
                 [key: string]: unknown;
             }[];
+            agent_result?: components["schemas"]["AgentResult"] | null;
         };
         /** ExtractRelationsRequest */
         ExtractRelationsRequest: {
@@ -2874,7 +3151,7 @@ export interface components {
         IngestRelationsFromPreviewRequest: {
             /** Project Id */
             project_id: number;
-            data: components["schemas"]["RelationExtraction-Input"];
+            data: components["schemas"]["RelationExtraction"];
             /** Volume Number */
             volume_number?: number | null;
             /** Chapter Number */
@@ -3037,6 +3314,47 @@ export interface components {
             description?: string | null;
             /** Content */
             content: string;
+            /**
+             * Knowledge Type
+             * @default reference
+             * @enum {string}
+             */
+            knowledge_type: "design" | "memory" | "skill" | "reference";
+            /** Summary */
+            summary?: string | null;
+            /**
+             * Summary Enabled
+             * @default false
+             */
+            summary_enabled: boolean;
+            /**
+             * Is Injectable
+             * @default false
+             */
+            is_injectable: boolean;
+            /**
+             * Injection Mode
+             * @default none
+             * @enum {string}
+             */
+            injection_mode: "none" | "full" | "summary";
+            /** Injection Config */
+            injection_config?: {
+                [key: string]: unknown;
+            } | null;
+            /** Source */
+            source?: string | null;
+            /** Maintenance Notes */
+            maintenance_notes?: string | null;
+        };
+        /** KnowledgeMetadata */
+        KnowledgeMetadata: {
+            /** Knowledge Types */
+            knowledge_types: string[];
+            /** Injection Modes */
+            injection_modes: string[];
+            /** Retrieval Backends */
+            retrieval_backends: string[];
         };
         /** KnowledgeRead */
         KnowledgeRead: {
@@ -3051,6 +3369,38 @@ export interface components {
              * @default false
              */
             built_in: boolean;
+            /**
+             * Knowledge Type
+             * @default reference
+             * @enum {string}
+             */
+            knowledge_type: "design" | "memory" | "skill" | "reference";
+            /** Summary */
+            summary?: string | null;
+            /**
+             * Summary Enabled
+             * @default false
+             */
+            summary_enabled: boolean;
+            /**
+             * Is Injectable
+             * @default false
+             */
+            is_injectable: boolean;
+            /**
+             * Injection Mode
+             * @default none
+             * @enum {string}
+             */
+            injection_mode: "none" | "full" | "summary";
+            /** Injection Config */
+            injection_config?: {
+                [key: string]: unknown;
+            } | null;
+            /** Source */
+            source?: string | null;
+            /** Maintenance Notes */
+            maintenance_notes?: string | null;
             /** Id */
             id: number;
         };
@@ -3062,6 +3412,24 @@ export interface components {
             description?: string | null;
             /** Content */
             content?: string | null;
+            /** Knowledge Type */
+            knowledge_type?: ("design" | "memory" | "skill" | "reference") | null;
+            /** Summary */
+            summary?: string | null;
+            /** Summary Enabled */
+            summary_enabled?: boolean | null;
+            /** Is Injectable */
+            is_injectable?: boolean | null;
+            /** Injection Mode */
+            injection_mode?: ("none" | "full" | "summary") | null;
+            /** Injection Config */
+            injection_config?: {
+                [key: string]: unknown;
+            } | null;
+            /** Source */
+            source?: string | null;
+            /** Maintenance Notes */
+            maintenance_notes?: string | null;
         };
         /** LLMConfigCreate */
         LLMConfigCreate: {
@@ -3445,12 +3813,7 @@ export interface components {
             chapter_number?: number | null;
         };
         /** RelationExtraction */
-        "RelationExtraction-Input": {
-            /** Relations */
-            relations?: components["schemas"]["RelationItem"][];
-        };
-        /** RelationExtraction */
-        "RelationExtraction-Output": {
+        RelationExtraction: {
             /** Relations */
             relations?: components["schemas"]["RelationItem"][];
         };
@@ -4082,21 +4445,142 @@ export interface components {
              */
             affection: string;
         };
-        /** UpdateDynamicInfo */
-        "UpdateDynamicInfo-Input": {
+        /** TraceRunCreate */
+        TraceRunCreate: {
+            /** Project Id */
+            project_id?: number | null;
+            /** Card Id */
+            card_id?: number | null;
+            /** Entrypoint */
+            entrypoint: string;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+        };
+        /** TraceRunRead */
+        TraceRunRead: {
+            /** Id */
+            id: string;
+            /** Project Id */
+            project_id?: number | null;
+            /** Card Id */
+            card_id?: number | null;
+            /** Entrypoint */
+            entrypoint: string;
+            /** Status */
+            status: string;
             /**
-             * Info List
-             * @description 需要更新的动态信息列表
+             * Started At
+             * Format: date-time
              */
-            info_list: components["schemas"]["DynamicInfo"][];
+            started_at: string;
+            /** Ended At */
+            ended_at?: string | null;
+            /** Metadata Json */
+            metadata_json?: {
+                [key: string]: unknown;
+            } | null;
+            /** Steps */
+            steps?: components["schemas"]["TraceStepRead"][];
+        };
+        /** TraceSourceRead */
+        TraceSourceRead: {
+            /** Id */
+            id: string;
+            /** Step Id */
+            step_id: string;
+            /** Source Type */
+            source_type: string;
+            /** Source Ref */
+            source_ref?: string | null;
+            /** Label */
+            label: string;
+            /** Preview */
+            preview?: string | null;
+            /** Jump Target */
+            jump_target?: {
+                [key: string]: unknown;
+            } | null;
+            /** Metadata Json */
+            metadata_json?: {
+                [key: string]: unknown;
+            } | null;
+            /** Spans */
+            spans?: components["schemas"]["TraceSpanRead"][];
+        };
+        /** TraceSpanRead */
+        TraceSpanRead: {
+            /** Id */
+            id: string;
+            /** Step Id */
+            step_id: string;
+            /** Source Id */
+            source_id: string;
+            /** Start Offset */
+            start_offset: number;
+            /** End Offset */
+            end_offset: number;
+            /** Text */
+            text?: string | null;
+            /** Metadata Json */
+            metadata_json?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** TraceStepRead */
+        TraceStepRead: {
+            /** Id */
+            id: string;
+            /** Run Id */
+            run_id: string;
+            /** Name */
+            name: string;
+            /** Kind */
+            kind: string;
+            /** Status */
+            status: string;
             /**
-             * Delete Info List
-             * @description 可选的删除列表
+             * Timestamp
+             * Format: date-time
              */
-            delete_info_list?: components["schemas"]["DeletionInfo"][] | null;
+            timestamp: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Ended At */
+            ended_at?: string | null;
+            /** External Id */
+            external_id?: string | null;
+            /** Input Summary */
+            input_summary?: {
+                [key: string]: unknown;
+            } | null;
+            /** Output Summary */
+            output_summary?: {
+                [key: string]: unknown;
+            } | null;
+            /** Input Schema */
+            input_schema?: {
+                [key: string]: unknown;
+            } | null;
+            /** Output Schema */
+            output_schema?: {
+                [key: string]: unknown;
+            } | null;
+            /** Error */
+            error?: string | null;
+            /** Metadata Json */
+            metadata_json?: {
+                [key: string]: unknown;
+            } | null;
+            /** Sources */
+            sources?: components["schemas"]["TraceSourceRead"][];
         };
         /** UpdateDynamicInfo */
-        "UpdateDynamicInfo-Output": {
+        UpdateDynamicInfo: {
             /**
              * Info List
              * @description 需要更新的动态信息列表
@@ -4112,7 +4596,7 @@ export interface components {
         UpdateDynamicInfoRequest: {
             /** Project Id */
             project_id: number;
-            data: components["schemas"]["UpdateDynamicInfo-Input"];
+            data: components["schemas"]["UpdateDynamicInfo"];
             /**
              * Queue Size
              * @default 5
@@ -4134,6 +4618,10 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
         };
         /** WorkflowAgentChatRequest */
         WorkflowAgentChatRequest: {
@@ -5085,6 +5573,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assistant_tools_api_ai_assistant_tools_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantToolMetadata"][];
                 };
             };
         };
@@ -6483,7 +6991,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RelationExtraction-Output"];
+                    "application/json": components["schemas"]["RelationExtraction"];
                 };
             };
             /** @description Validation Error */
@@ -6516,7 +7024,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UpdateDynamicInfo-Output"];
+                    "application/json": components["schemas"]["UpdateDynamicInfo"];
                 };
             };
             /** @description Validation Error */
@@ -7114,6 +7622,26 @@ export interface operations {
             };
         };
     };
+    get_knowledge_metadata_api_knowledge_meta_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_KnowledgeMetadata_"];
+                };
+            };
+        };
+    };
     list_knowledge_api_knowledge__get: {
         parameters: {
             query?: never;
@@ -7163,6 +7691,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_knowledge_api_knowledge_search_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_List_KnowledgeRead__"];
                 };
             };
         };
@@ -7251,6 +7799,135 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_trace_runs_api_ai_traces_runs_get: {
+        parameters: {
+            query?: {
+                project_id?: number | null;
+                card_id?: number | null;
+                entrypoint?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceRunRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_trace_run_api_ai_traces_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TraceRunCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceRunRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_trace_run_api_ai_traces_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceRunRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_trace_steps_api_ai_traces_runs__run_id__steps_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceStepRead"][];
                 };
             };
             /** @description Validation Error */

@@ -1187,6 +1187,17 @@ def get_assistant_tool_descriptions(
     )
 
 
+def get_assistant_tool_metadata(
+    caller: str = TOOL_CALLER_ASSISTANT,
+    allowed_tool_names: Optional[List[str]] = None,
+):
+    allowed = frozenset(allowed_tool_names) if allowed_tool_names is not None else None
+    return AI_TOOL_REGISTRY.list_tool_metadata(
+        context=ToolExecutionContext(caller=caller, allowed_tool_names=allowed),
+        namespace="assistant",
+    )
+
+
 _register_assistant_tools()
 
 ASSISTANT_TOOLS = get_assistant_tools()

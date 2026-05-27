@@ -1,20 +1,17 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { QuestionFilled } from '@element-plus/icons-vue'
 import { useAssistantPreferences } from '@renderer/composables/useAssistantPreferences'
+import {
+  listAssistantTools,
+  type AssistantToolMetadata
+} from '@renderer/api/setting'
 
 // 通过组合式统一管理灵感助手偏好，方便在设置页与助手面板之间复用
 const prefs = useAssistantPreferences()
-
-const ctxSummaryEnabled = computed({
-  get: () => prefs.contextSummaryEnabled.value,
-  set: (val: boolean) => prefs.setContextSummaryEnabled(val)
-})
-
-const ctxSummaryThreshold = computed({
-  get: () => prefs.contextSummaryThreshold.value,
-  set: (val: number | null) => prefs.setContextSummaryThreshold(val)
-})
+const agentTools = ref<AssistantToolMetadata[]>([])
+const toolsLoading = ref(false)
+const toolsError = ref('')
 
 const reactModeEnabled = computed({
   get: () => prefs.reactModeEnabled.value,
@@ -35,6 +32,43 @@ const assistantTimeout = computed({
   get: () => prefs.assistantTimeout.value,
   set: (val: number | null) => prefs.setAssistantTimeout(val)
 })
+
+const toolCountText = computed(() => `${agentTools.value.length} 个工具`)
+
+function formatRiskLevel(riskLevel: string): string {
+  const riskLabels: Record<string, string> = {
+    low: '低风险',
+    medium: '会写入',
+    high: '需谨慎'
+  }
+  return riskLabels[riskLevel] || riskLevel
+}
+
+function riskTagType(riskLevel: string): 'info' | 'warning' | 'danger' {
+  if (riskLevel === 'high') return 'danger'
+  if (riskLevel === 'medium') return 'warning'
+  return 'info'
+}
+
+function getToolParameterNames(tool: AssistantToolMetadata): string[] {
+  const properties = tool.args_schema?.properties
+  if (!properties || typeof properties !== 'object') return []
+  return Object.keys(properties)
+}
+
+async function loadAgentTools(): Promise<void> {
+  toolsLoading.value = true
+  toolsError.value = ''
+  try {
+    agentTools.value = await listAssistantTools()
+  } catch (err: unknown) {
+    toolsError.value = err instanceof Error ? err.message : '读取 Agent 工具失败'
+  } finally {
+    toolsLoading.value = false
+  }
+}
+
+onMounted(loadAgentTools)
 </script>
 
 <template>
@@ -138,6 +172,72 @@ const assistantTimeout = computed({
         <el-switch v-model="reactModeEnabled" />
       </el-form-item>
     </el-form>
+
+    <el-divider />
+
+    <div class="tools-section">
+      <div class="tools-head">
+        <div>
+          <h4 class="tools-title">小说 Agent 可用工具</h4>
+          <p class="tools-desc">
+            当前项目中的灵感/小说 Agent 会从后端注册表获得这些工具。
+          </p>
+        </div>
+        <div class="tools-actions">
+          <el-tag size="small" effect="plain">{{ toolCountText }}</el-tag>
+          <el-button size="small" :loading="toolsLoading" @click="loadAgentTools">刷新</el-button>
+        </div>
+      </div>
+
+      <el-alert
+        v-if="toolsError"
+        class="tools-error"
+        type="error"
+        :title="toolsError"
+        show-icon
+        :closable="false"
+      />
+
+      <el-skeleton v-if="toolsLoading && !agentTools.length" :rows="4" animated />
+
+      <el-empty
+        v-else-if="!toolsError && !agentTools.length"
+        description="暂无可用工具"
+        :image-size="80"
+      />
+
+      <div v-else class="tool-list">
+        <div v-for="tool in agentTools" :key="tool.name" class="tool-item">
+          <div class="tool-item-head">
+            <div class="tool-name-row">
+              <span class="tool-name">{{ tool.name }}</span>
+              <el-tag size="small" :type="riskTagType(tool.risk_level)" effect="plain">
+                {{ formatRiskLevel(tool.risk_level) }}
+              </el-tag>
+              <el-tag v-if="tool.requires_confirmation" size="small" type="danger" effect="plain">
+                需确认
+              </el-tag>
+            </div>
+            <span class="tool-source">{{ tool.namespace }}</span>
+          </div>
+          <p class="tool-description">{{ tool.description || '无说明' }}</p>
+          <div class="tool-params">
+            <span class="param-label">参数</span>
+            <template v-if="getToolParameterNames(tool).length">
+              <el-tag
+                v-for="param in getToolParameterNames(tool)"
+                :key="`${tool.name}-${param}`"
+                size="small"
+                effect="plain"
+              >
+                {{ param }}
+              </el-tag>
+            </template>
+            <span v-else class="empty-params">无参数</span>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -182,5 +282,100 @@ const assistantTimeout = computed({
 .field-help-icon {
   margin-left: 4px;
   cursor: help;
+}
+
+.tools-section {
+  max-width: 860px;
+}
+
+.tools-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.tools-title {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tools-desc {
+  margin: 0;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.tools-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.tools-error {
+  margin-bottom: 12px;
+}
+
+.tool-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.tool-item {
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--el-fill-color-blank);
+}
+
+.tool-item-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.tool-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tool-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.tool-source {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.tool-description {
+  margin: 8px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-regular);
+  white-space: pre-wrap;
+}
+
+.tool-params {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.param-label,
+.empty-params {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 </style>

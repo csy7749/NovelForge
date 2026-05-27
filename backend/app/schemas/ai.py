@@ -67,6 +67,19 @@ class AssistantChatRequest(BaseModel):
     agent_requested_tools: Optional[List[str]] = Field(default=None, description="本次委派允许暴露给目标 agent 的工具名")
 
 
+class AssistantToolMetadata(BaseModel):
+    """灵感助手可用工具元信息。"""
+
+    name: str = Field(description="工具名称")
+    description: str = Field(default="", description="工具说明")
+    namespace: str = Field(description="工具命名空间")
+    args_schema: Dict[str, Any] = Field(default_factory=dict, description="工具参数 JSON Schema")
+    risk_level: str = Field(default="low", description="风险等级：low / medium / high")
+    requires_confirmation: bool = Field(default=False, description="是否需要用户确认")
+    source: str = Field(default="native", description="工具来源")
+    tags: List[str] = Field(default_factory=list, description="工具标签")
+
+
 class GeneralAIRequest(BaseModel):
     input: Dict[str, Any]
     llm_config_id: Optional[int] = None

@@ -2,8 +2,8 @@ import http from './request'
 import type { components } from '@renderer/types/generated'
 
 // 使用后端生成的类型（注意部分为 Input/Output 变体）
-export type UpdateDynamicInfoOutput = components['schemas']['UpdateDynamicInfo-Output']
-export type RelationExtractionOutput = components['schemas']['RelationExtraction-Output']
+export type UpdateDynamicInfoOutput = components['schemas']['UpdateDynamicInfo']
+export type RelationExtractionOutput = components['schemas']['RelationExtraction']
 export interface ParticipantTyped {
 	name: string
 	type: string

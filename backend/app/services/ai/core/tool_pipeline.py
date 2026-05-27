@@ -223,6 +223,19 @@ def _tool_metadata(definition: ToolDefinition) -> Dict[str, Any]:
     }
 
 
+def _definition_display_metadata(definition: ToolDefinition) -> Dict[str, Any]:
+    return {
+        "name": definition.identity.name,
+        "description": definition.identity.description,
+        "namespace": definition.identity.namespace,
+        "args_schema": dict(definition.args_schema or {}),
+        "risk_level": definition.policy.risk_level,
+        "requires_confirmation": definition.policy.requires_confirmation,
+        "source": definition.source,
+        "tags": list(definition.identity.tags),
+    }
+
+
 def _make_tool_runner(
     definition: ToolDefinition,
     context: ToolExecutionContext,
@@ -342,6 +355,18 @@ class ToolRegistry:
         if namespace is None:
             return items
         return [item for item in items if item.identity.namespace == namespace]
+
+    def list_tool_metadata(
+        self,
+        *,
+        context: ToolExecutionContext,
+        namespace: Optional[str] = None,
+    ) -> list[Dict[str, Any]]:
+        return [
+            _definition_display_metadata(item)
+            for item in self.list_definitions(namespace)
+            if _is_allowed(item, context)
+        ]
 
     def get_tools(
         self,

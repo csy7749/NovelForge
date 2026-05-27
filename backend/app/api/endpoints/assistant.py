@@ -11,10 +11,21 @@ from loguru import logger
 
 from app.db.session import get_session
 from app.services.ai.assistant.assistant_service import generate_assistant_chat_streaming
-from app.schemas.ai import AssistantChatRequest
+from app.schemas.ai import AssistantChatRequest, AssistantToolMetadata
+from app.services.ai.assistant.tools import get_assistant_tool_metadata
 from app.utils.stream_utils import wrap_sse_stream
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
+
+
+@router.get("/tools", response_model=list[AssistantToolMetadata])
+async def assistant_tools() -> list[AssistantToolMetadata]:
+    """返回灵感/小说 Agent 当前可用工具清单。"""
+
+    return [
+        AssistantToolMetadata.model_validate(item)
+        for item in get_assistant_tool_metadata()
+    ]
 
 
 @router.post("/chat")

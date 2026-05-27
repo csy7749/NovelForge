@@ -115,3 +115,26 @@ def test_legacy_tool_registration_invokes_wrapped_tool() -> None:
 
     assert result["success"] is True
     assert result["value"] == 4
+
+
+def test_registry_lists_allowed_tool_metadata() -> None:
+    registry = ToolRegistry()
+    registry.register(_definition())
+
+    metadata = registry.list_tool_metadata(
+        context=ToolExecutionContext(caller="allowed"),
+        namespace="test",
+    )
+
+    assert metadata == [
+        {
+            "name": "echo_text",
+            "description": "Echo validated text.",
+            "namespace": "test",
+            "args_schema": EchoArgs.model_json_schema(),
+            "risk_level": "low",
+            "requires_confirmation": False,
+            "source": "native",
+            "tags": [],
+        }
+    ]
