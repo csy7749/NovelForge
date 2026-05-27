@@ -2,6 +2,12 @@ import { ref, watch, type Ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import type { AssistantChatSession, AssistantPanelMessage } from '@renderer/types/assistantPanel'
+import {
+  buildAssistantSessionArchive,
+  buildAssistantSessionArchiveFilename,
+  mergeAssistantSessions,
+  parseAssistantSessionArchive,
+} from '@renderer/services/assistantSessionArchive'
 
 interface UseAssistantSessionHistoryOptions {
   projectId: Ref<number | null | undefined>
@@ -10,6 +16,19 @@ interface UseAssistantSessionHistoryOptions {
   historySessions?: Ref<AssistantChatSession[]>
   historyDrawerVisible?: Ref<boolean>
   onScrollToBottom?: () => void
+}
+
+interface AssistantSessionHistoryController {
+  currentSession: Ref<AssistantChatSession>
+  historySessions: Ref<AssistantChatSession[]>
+  historyDrawerVisible: Ref<boolean>
+  saveCurrentSession: () => void
+  createNewSession: () => void
+  loadSession: (sessionId: string) => void
+  handleDeleteSession: (sessionId: string) => void
+  formatSessionTime: (timestamp: number) => string
+  exportHistorySessions: () => void
+  importHistorySessionsFromFile: (file: File) => Promise<void>
 }
 
 function createEmptySession(projectId: number): AssistantChatSession {
@@ -42,7 +61,19 @@ function dedupeSessionsById(sessions: AssistantChatSession[]): AssistantChatSess
   return result
 }
 
-export function useAssistantSessionHistory(options: UseAssistantSessionHistoryOptions) {
+function downloadTextFile(filename: string, content: string): void {
+  const blob = new Blob([content], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+export function useAssistantSessionHistory(
+  options: UseAssistantSessionHistoryOptions,
+): AssistantSessionHistoryController {
   const currentSession = options.currentSession ?? ref<AssistantChatSession>(createEmptySession(options.projectId.value || 0))
   const historySessions = options.historySessions ?? ref<AssistantChatSession[]>([])
   const historyDrawerVisible = options.historyDrawerVisible ?? ref(false)
@@ -222,6 +253,75 @@ export function useAssistantSessionHistory(options: UseAssistantSessionHistoryOp
     return `${date.getMonth() + 1}/${date.getDate()}`
   }
 
+  function activateSessionAfterImport(projectId: number, sessions: AssistantChatSession[]): void {
+    const activeSessionId = readActiveSessionId(projectId)
+    const targetSession = activeSessionId
+      ? (sessions.find(item => item.id === activeSessionId) || sessions[0])
+      : sessions[0]
+
+    if (!targetSession) {
+      currentSession.value = createEmptySession(projectId)
+      options.messages.value = []
+      writeActiveSessionId(projectId, currentSession.value.id)
+      return
+    }
+
+    currentSession.value = { ...targetSession }
+    options.messages.value = [...targetSession.messages]
+    writeActiveSessionId(projectId, targetSession.id)
+    options.onScrollToBottom?.()
+  }
+
+  async function confirmProjectMismatch(archiveProjectId: number, currentProjectId: number): Promise<void> {
+    if (archiveProjectId === currentProjectId) return
+    await ElMessageBox.confirm(
+      `导入文件来自项目 ${archiveProjectId}，当前项目是 ${currentProjectId}。继续导入会把这些会话归入当前项目。`,
+      '确认导入',
+      {
+        confirmButtonText: '继续导入',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  }
+
+  function exportHistorySessions(): void {
+    const projectId = options.projectId.value
+    if (!projectId) {
+      ElMessage.error('请先打开项目再导出历史对话')
+      return
+    }
+
+    saveCurrentSession()
+    if (historySessions.value.length === 0) {
+      ElMessage.warning('暂无可导出的历史对话')
+      return
+    }
+
+    const archive = buildAssistantSessionArchive({ projectId, sessions: historySessions.value })
+    const filename = buildAssistantSessionArchiveFilename(projectId, archive.exportedAt)
+    downloadTextFile(filename, JSON.stringify(archive, null, 2))
+    ElMessage.success('已导出历史对话 JSON，可提交到 git 同步')
+  }
+
+  async function importHistorySessionsFromFile(file: File): Promise<void> {
+    const projectId = options.projectId.value
+    if (!projectId) throw new Error('请先打开项目再导入历史对话')
+
+    const archive = parseAssistantSessionArchive(await file.text())
+    await confirmProjectMismatch(archive.projectId, projectId)
+    saveCurrentSession()
+
+    const importedSessions = archive.sessions.map(session => ({ ...session, projectId }))
+    const mergedSessions = mergeAssistantSessions(historySessions.value, importedSessions)
+    const key = getSessionStorageKey(projectId)
+
+    localStorage.setItem(key, JSON.stringify(mergedSessions))
+    historySessions.value = mergedSessions
+    activateSessionAfterImport(projectId, mergedSessions)
+    ElMessage.success(`已导入 ${archive.sessions.length} 个历史对话`)
+  }
+
   watch(
     () => options.projectId.value,
     newProjectId => {
@@ -256,5 +356,7 @@ export function useAssistantSessionHistory(options: UseAssistantSessionHistoryOp
     loadSession,
     handleDeleteSession,
     formatSessionTime,
+    exportHistorySessions,
+    importHistorySessionsFromFile,
   }
 }

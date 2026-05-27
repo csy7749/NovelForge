@@ -183,6 +183,21 @@
           <el-button type="primary" :icon="Plus" @click="createNewSession" style="width: 100%;">
             新增对话
           </el-button>
+          <div class="history-sync-actions">
+            <el-button :icon="Download" @click="exportHistorySessions">
+              导出
+            </el-button>
+            <el-button :icon="Upload" @click="openHistoryImportFile">
+              导入
+            </el-button>
+            <input
+              ref="historyImportInputRef"
+              class="history-import-input"
+              type="file"
+              accept=".json,application/json"
+              @change="handleHistoryImportFileChange"
+            />
+          </div>
         </div>
 
         <el-divider />
@@ -223,7 +238,7 @@
 import { ref, watch, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { generateContinuationStreaming, renderPromptWithKnowledge } from '@renderer/api/ai'
 import { listLLMConfigs, type LLMConfigRead } from '@renderer/api/setting'
-import { Plus, Promotion, ChatDotRound, Delete, Clock, Document, Close, VideoPause } from '@element-plus/icons-vue'
+import { Plus, Promotion, ChatDotRound, Delete, Clock, Document, Close, VideoPause, Download, Upload } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import AgentMessageList from '@/components/shared/AgentMessageList.vue'
 import AgentComposer from '@/components/shared/AgentComposer.vue'
@@ -241,12 +256,30 @@ import { useMessageListScroll } from '@renderer/composables/useMessageListScroll
 import type { AssistantChatSession, AssistantPanelMessage } from '@renderer/types/assistantPanel'
 import type { AssistantRef } from '@renderer/api/ai'
 
-const props = defineProps<{ resolvedContext: string; llmConfigId?: number | null; promptName?: string | null; temperature?: number | null; max_tokens?: number | null; timeout?: number | null; effectiveSchema?: any; generationPromptName?: string | null; currentCardId?: number | null; currentCardTitle?: string | null; currentCardContent?: any }>()
+interface AssistantPanelProps {
+  resolvedContext: string
+  llmConfigId?: number | null
+  promptName?: string | null
+  temperature?: number | null
+  max_tokens?: number | null
+  timeout?: number | null
+  effectiveSchema?: unknown
+  generationPromptName?: string | null
+  currentCardId?: number | null
+  currentCardTitle?: string | null
+  currentCardContent?: unknown
+}
+
+type AssistantStreamController = ReturnType<typeof generateContinuationStreaming>
+type ExecutedTool = { tool_name: string; result: Record<string, unknown> | null | undefined }
+
+const props = defineProps<AssistantPanelProps>()
 const emit = defineEmits<{ 'finalize': [string]; 'refresh-context': []; 'reset-selection': []; 'jump-to-card': [{ projectId: number; cardId: number }] }>()
 const messages = ref<AssistantPanelMessage[]>([])
 const draft = ref('')
 const isStreaming = ref(false)
-let streamCtl: { cancel: () => void } | null = null
+const historyImportInputRef = ref<HTMLInputElement | null>(null)
+let streamCtl: AssistantStreamController | null = null
 const { messageListRef, scrollToBottom } = useMessageListScroll()
 
 // ---- 多卡片数据引用（跨项目，使用 Pinia） ----
@@ -291,22 +324,22 @@ const {
   loadSession,
   handleDeleteSession,
   formatSessionTime,
+  exportHistorySessions,
+  importHistorySessionsFromFile,
 } = sessionHistory
 
 const lastRun = ref<{ prev: string; tail: string; targetIdx: number } | null>(null)
-const canRegenerate = computed(() => !isStreaming.value && !!lastRun.value && messages.value[lastRun.value.targetIdx]?.role === 'assistant')
-
 // 模型选择（覆盖卡片配置，按项目记忆）
 const llmOptions = ref<LLMConfigRead[]>([])
 const overrideLlmId = ref<number | null>(null)
-const effectiveLlmId = computed(() => overrideLlmId.value || (props.llmConfigId as any) || null)
+const effectiveLlmId = computed(() => overrideLlmId.value || props.llmConfigId || null)
 const MODEL_KEY_PREFIX = 'nf:assistant:model:'
-function modelKeyForProject(pid: number) { return `${MODEL_KEY_PREFIX}${pid}` }
+function modelKeyForProject(pid: number): string { return `${MODEL_KEY_PREFIX}${pid}` }
 
 // Thinking 模式开关（按项目记忆）
 const useThinkingMode = ref(false)
 const THINKING_MODE_KEY_PREFIX = 'nf:assistant:thinking:'
-function thinkingModeKeyForProject(pid: number) { return `${THINKING_MODE_KEY_PREFIX}${pid}` }
+function thinkingModeKeyForProject(pid: number): string { return `${THINKING_MODE_KEY_PREFIX}${pid}` }
 
 // 引用卡片显示控制
 const MAX_VISIBLE_REFS = 5  // 最多显示5个引用（约两行，每行2-3个）
@@ -316,21 +349,27 @@ const visibleRefs = computed(() => {
 })
 
 watch(overrideLlmId, (val) => {
-  try { const pid = projectStore.currentProject?.id; if (pid && val) localStorage.setItem(modelKeyForProject(pid), String(val)) } catch {}
+  try { const pid = projectStore.currentProject?.id; if (pid && val) localStorage.setItem(modelKeyForProject(pid), String(val)) } catch {
+    // ignore localStorage errors
+  }
 })
 
 watch(useThinkingMode, (val) => {
-  try { const pid = projectStore.currentProject?.id; if (pid) localStorage.setItem(thinkingModeKeyForProject(pid), String(val)) } catch {}
+  try { const pid = projectStore.currentProject?.id; if (pid) localStorage.setItem(thinkingModeKeyForProject(pid), String(val)) } catch {
+    // ignore localStorage errors
+  }
 })
 
 const injectedCardPrompt = ref<string>('')
-async function loadInjectedCardPrompt() {
+async function loadInjectedCardPrompt(): Promise<void> {
   try {
     const name = props.generationPromptName || ''
     if (!name) { injectedCardPrompt.value = ''; return }
     const resp = await renderPromptWithKnowledge(name)
     injectedCardPrompt.value = resp?.text || ''
-  } catch { injectedCardPrompt.value = '' }
+  } catch {
+    injectedCardPrompt.value = ''
+  }
 }
 
 watch(() => props.generationPromptName, async () => { await loadInjectedCardPrompt() }, { immediate: true })
@@ -362,7 +401,23 @@ const {
   confirmAddInjectedRefs,
 } = injectionSelector
 
-function removeInjectedRef(idx: number) { assistantStore.removeInjectedRefAt(idx) }
+function removeInjectedRef(idx: number): void { assistantStore.removeInjectedRefAt(idx) }
+
+function openHistoryImportFile(): void {
+  historyImportInputRef.value?.click()
+}
+
+async function handleHistoryImportFileChange(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  try {
+    await importHistorySessionsFromFile(file)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '导入历史对话失败')
+  }
+}
 
 function getRefKey(ref: AssistantRef): string {
   if (ref.refType === 'card') return `card:${ref.projectId}:${ref.cardId}`
@@ -380,7 +435,7 @@ function getRefLabel(ref: AssistantRef): string {
   return `审核结果 / ${ref.targetTitle}`
 }
 
-const { buildConversationText, buildAssistantChatRequest } = useAssistantRequestBuilder({
+const { buildAssistantChatRequest } = useAssistantRequestBuilder({
   messages,
   assistantStore,
   resolvedContext: computed(() => props.resolvedContext || ''),
@@ -395,7 +450,16 @@ const { buildConversationText, buildAssistantChatRequest } = useAssistantRequest
   },
 })
 
-async function startStreaming(targetIdx: number) {
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === 'string' && message.trim()) return message
+  }
+  return fallback
+}
+
+async function startStreaming(targetIdx: number): Promise<void> {
   isStreaming.value = true
 
   const hasChapterExcerptRefs = assistantStore.injectedRefs.some(ref => ref.refType === 'chapter_excerpt')
@@ -417,7 +481,7 @@ async function startStreaming(targetIdx: number) {
   const chatRequest = buildAssistantChatRequest()
   const promptName = (props.promptName && props.promptName.trim()) ? props.promptName : '灵感对话'
 
-  streamCtl = generateContinuationStreaming({
+  const streamingRequest = {
     ...chatRequest,
     llm_config_id: overrideLlmId.value || undefined,
     prompt_name: promptName,
@@ -425,7 +489,9 @@ async function startStreaming(targetIdx: number) {
     card_id: props.currentCardId || undefined,
     stream: true,
     thinking_enabled: useThinkingMode.value
-  } as any, (chunk) => {
+  } as unknown as Parameters<typeof generateContinuationStreaming>[0]
+
+  streamCtl = generateContinuationStreaming(streamingRequest, (chunk) => {
     applyAssistantStreamChunk({
       messages,
       targetIdx,
@@ -452,22 +518,24 @@ async function startStreaming(targetIdx: number) {
     if (messages.value.length > 0) {
       saveCurrentSession()
     }
-  }, (err) => { 
+  }, (err: unknown) => {
     if (messages.value[targetIdx]) {
       messages.value[targetIdx].toolsInProgress = undefined
     }
-    ElMessage.error(err?.message || '生成失败')
+    ElMessage.error(getErrorMessage(err, '生成失败'))
     isStreaming.value = false
     streamCtl = null 
-  }) as any
+  })
 }
 
-function handleSend() {
+function handleSend(): void {
   if (!canSend.value || isStreaming.value) return
   lastRun.value = null
   const userText = draft.value.trim(); if (!userText) return
   messages.value.push({ role: 'user', content: userText })
-  try { const pid = projectStore.currentProject?.id; if (pid) assistantStore.appendHistory(pid, { role: 'user', content: userText }) } catch {}
+  try { const pid = projectStore.currentProject?.id; if (pid) assistantStore.appendHistory(pid, { role: 'user', content: userText }) } catch {
+    // keep the active message even if legacy flat history cannot be updated
+  }
   draft.value = ''
   scrollToBottom()
 
@@ -478,8 +546,10 @@ function handleSend() {
   startStreaming(assistantIdx)
 }
 
-function handleCancel() { 
-  try { streamCtl?.cancel() } catch {}
+function handleCancel(): void {
+  try { streamCtl?.cancel() } catch {
+    // cancellation may race with stream close
+  }
   isStreaming.value = false
   
   // 清除所有消息中的工具调用进度提示
@@ -490,7 +560,7 @@ function handleCancel() {
   })
 }
 
-function handlePrimaryAction() {
+function handlePrimaryAction(): void {
   if (isStreaming.value) {
     handleCancel()
     return
@@ -498,7 +568,7 @@ function handlePrimaryAction() {
   handleSend()
 }
 
-function handleCopyAssistantAt(index: number) {
+function handleCopyAssistantAt(index: number): void {
   const target = messages.value[index]
   if (!target || target.role !== 'assistant') return
   const text = (target.content || '').trim()
@@ -511,7 +581,7 @@ function handleCopyAssistantAt(index: number) {
   })
 }
 
-function handleCopyUserAt(index: number) {
+function handleCopyUserAt(index: number): void {
   const target = messages.value[index]
   if (!target || target.role !== 'user') return
   const text = (target.content || '').trim()
@@ -524,7 +594,7 @@ function handleCopyUserAt(index: number) {
   })
 }
 
-function handleRegenerateAt(index: number) {
+function handleRegenerateAt(index: number): void {
   if (isStreaming.value) return
   if (index < 0 || index >= messages.value.length) return
   if (messages.value[index]?.role !== 'assistant') return
@@ -538,7 +608,7 @@ function handleRegenerateAt(index: number) {
   startStreaming(index)
 }
 
-function handleDeleteAssistantAt(index: number) {
+function handleDeleteAssistantAt(index: number): void {
   if (isStreaming.value) return
   if (index < 0 || index >= messages.value.length) return
   if (messages.value[index]?.role !== 'assistant') return
@@ -547,7 +617,7 @@ function handleDeleteAssistantAt(index: number) {
   ElMessage.success('已删除该回复')
 }
 
-function handleDeleteUserAt(index: number) {
+function handleDeleteUserAt(index: number): void {
   if (isStreaming.value) return
   if (index < 0 || index >= messages.value.length) return
   if (messages.value[index]?.role !== 'user') return
@@ -556,7 +626,7 @@ function handleDeleteUserAt(index: number) {
   ElMessage.success('已删除该消息')
 }
 
-function deleteMessageAt(index: number) {
+function deleteMessageAt(index: number): void {
   if (index < 0 || index >= messages.value.length) return
 
   messages.value.splice(index, 1)
@@ -575,39 +645,7 @@ function deleteMessageAt(index: number) {
   saveCurrentSession()
 }
 
-function handleRegenerate() { if (!canRegenerate.value || !lastRun.value) return; messages.value[lastRun.value.targetIdx].content = ''; scrollToBottom(); startStreaming(lastRun.value.targetIdx) }
-function regenerateFromCurrent() {
-  if (isStreaming.value) return
-  const lastIndex = messages.value.length - 1
-  const lastIsAssistant = lastIndex >= 0 && messages.value[lastIndex].role === 'assistant'
-  let targetIdx: number
-  if (lastIsAssistant) {
-    resetAssistantMessageForRegenerate(messages.value[lastIndex])
-    targetIdx = lastIndex
-  } else {
-    targetIdx = messages.value.push({ role: 'assistant', content: '' }) - 1
-  }
-  lastRun.value = { prev: '', tail: '', targetIdx }
-  startStreaming(targetIdx)
-}
-function handleRegenerateWithHistory() {
-  // 优先移除历史中的最后一条助手消息
-  try {
-    const pid = projectStore.currentProject?.id
-    if (pid) {
-      const hist = assistantStore.getHistory(pid)
-      for (let i = hist.length - 1; i >= 0; i--) { if (hist[i].role === 'assistant') { hist.splice(i, 1); break } }
-      assistantStore.setHistory(pid, hist)
-    }
-  } catch {}
-  if (lastRun.value && canRegenerate.value) {
-    handleRegenerate()
-  } else {
-    regenerateFromCurrent()
-  }
-}
-function handleFinalize() { const summary = (() => { const last = [...messages.value].reverse().find(m => m.role === 'assistant'); return (last?.content || '').trim() || buildConversationText() })(); emit('finalize', summary) }
-function onChipClick(refItem: AssistantRef) {
+function onChipClick(refItem: AssistantRef): void {
   if (refItem.refType === 'review_result') {
     emit('jump-to-card', { projectId: refItem.projectId, cardId: refItem.targetId })
     return
@@ -641,11 +679,17 @@ onMounted(async () => {
         useThinkingMode.value = thinkingSaved === 'true'
       }
     }
-  } catch {}
+  } catch {
+    // keep defaults when local settings cannot be loaded
+  }
 })
 
 // ✅ 处理工具执行结果：将工具结果追加到指定的助手消息上
-function handleToolsExecuted(targetIdx: number, tools: Array<{tool_name: string, result: any}>) {
+function hasRecordResult(tool: ExecutedTool): tool is { tool_name: string; result: Record<string, unknown> } {
+  return typeof tool.result === 'object' && tool.result !== null
+}
+
+function handleToolsExecuted(targetIdx: number, tools: ExecutedTool[]): void {
   console.log('🔧 工具已执行:', targetIdx, tools)
 
   const msg = messages.value[targetIdx]
@@ -654,8 +698,6 @@ function handleToolsExecuted(targetIdx: number, tools: Array<{tool_name: string,
   // 刷新左侧卡片树（如果有卡片被创建或修改）
   const needsRefresh = tools.some(t => {
     const toolName = t.tool_name
-    const result = t.result
-    
     // 这些工具调用后需要刷新卡片列表
     const refreshTools = ['create_card', 'modify_card_field', 'batch_create_cards', 'replace_field_text', 'replace_card_text_by_lines']
     
@@ -665,8 +707,8 @@ function handleToolsExecuted(targetIdx: number, tools: Array<{tool_name: string,
     }
     
     // 或者有 card_id 字段的结果
-    if (result?.card_id) {
-      console.log(`🔄 检测到 card_id: ${result.card_id}，准备刷新卡片列表`)
+    if (hasRecordResult(t) && t.result.card_id) {
+      console.log(`🔄 检测到 card_id: ${t.result.card_id}，准备刷新卡片列表`)
       return true
     }
     
@@ -685,7 +727,7 @@ function handleToolsExecuted(targetIdx: number, tools: Array<{tool_name: string,
   }
   
   // 显示通知
-  const successTools = tools.filter(t => t.result?.success)
+  const successTools = tools.filter(t => hasRecordResult(t) && t.result.success)
   if (successTools.length > 0) {
     ElMessage.success(`✅ 已执行 ${successTools.length} 个操作`)
   }
@@ -693,7 +735,7 @@ function handleToolsExecuted(targetIdx: number, tools: Array<{tool_name: string,
 
 // 消息变化时自动保存（防抖，避免频繁保存）
 // 优化：仅监听数组长度和最后一条消息，避免深度监听导致性能问题
-let saveDebounceTimer: any = null
+let saveDebounceTimer: ReturnType<typeof setTimeout> | null = null
 watch([
   () => messages.value.length,
   () => messages.value[messages.value.length - 1]?.content
@@ -962,6 +1004,21 @@ onBeforeUnmount(() => {
 
 .history-actions {
   padding: 0 0 8px 0;
+}
+
+.history-sync-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.history-sync-actions .el-button {
+  margin-left: 0;
+}
+
+.history-import-input {
+  display: none;
 }
 
 .empty-history {
