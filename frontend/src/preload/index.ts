@@ -5,7 +5,9 @@ import { electronAPI } from '@electron-toolkit/preload'
 const api = {
   setApiKey: (id: number, apiKey: string) => ipcRenderer.invoke('secure:set-api-key', { id, apiKey }),
   getApiKey: (id: number) => ipcRenderer.invoke('secure:get-api-key', { id }),
-  openIdeasHome: () => ipcRenderer.invoke('ideas:open-home')
+  openIdeasHome: () => ipcRenderer.invoke('ideas:open-home'),
+  exportAssistantHistory: (payload: { filename: string; content: string }) =>
+    ipcRenderer.invoke('assistant-history:export', payload)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

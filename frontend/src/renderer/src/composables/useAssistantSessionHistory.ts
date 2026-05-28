@@ -11,6 +11,7 @@ import {
 
 interface UseAssistantSessionHistoryOptions {
   projectId: Ref<number | null | undefined>
+  projectName?: Ref<string | null | undefined>
   messages: Ref<AssistantPanelMessage[]>
   currentSession?: Ref<AssistantChatSession>
   historySessions?: Ref<AssistantChatSession[]>
@@ -27,7 +28,7 @@ interface AssistantSessionHistoryController {
   loadSession: (sessionId: string) => void
   handleDeleteSession: (sessionId: string) => void
   formatSessionTime: (timestamp: number) => string
-  exportHistorySessions: () => void
+  exportHistorySessions: () => Promise<void>
   importHistorySessionsFromFile: (file: File) => Promise<void>
 }
 
@@ -69,6 +70,11 @@ function downloadTextFile(filename: string, content: string): void {
   link.download = filename
   link.click()
   URL.revokeObjectURL(url)
+}
+
+function assertExportSuccess(result: { success: boolean; filePath?: string; error?: string }): string {
+  if (result.success && result.filePath) return result.filePath
+  throw new Error(result.error || '导出历史对话失败')
 }
 
 export function useAssistantSessionHistory(
@@ -285,7 +291,7 @@ export function useAssistantSessionHistory(
     )
   }
 
-  function exportHistorySessions(): void {
+  async function exportHistorySessions(): Promise<void> {
     const projectId = options.projectId.value
     if (!projectId) {
       ElMessage.error('请先打开项目再导出历史对话')
@@ -299,9 +305,21 @@ export function useAssistantSessionHistory(
     }
 
     const archive = buildAssistantSessionArchive({ projectId, sessions: historySessions.value })
-    const filename = buildAssistantSessionArchiveFilename(projectId, archive.exportedAt)
-    downloadTextFile(filename, JSON.stringify(archive, null, 2))
-    ElMessage.success('已导出历史对话 JSON，可提交到 git 同步')
+    const filename = buildAssistantSessionArchiveFilename({
+      projectId,
+      projectName: options.projectName?.value,
+      timestamp: archive.exportedAt,
+    })
+    const content = JSON.stringify(archive, null, 2)
+
+    if (window.api?.exportAssistantHistory) {
+      const filePath = assertExportSuccess(await window.api.exportAssistantHistory({ filename, content }))
+      ElMessage.success(`已导出到 ${filePath}`)
+      return
+    }
+
+    downloadTextFile(filename, content)
+    ElMessage.success('已下载历史对话 JSON，可提交到 git 同步')
   }
 
   async function importHistorySessionsFromFile(file: File): Promise<void> {

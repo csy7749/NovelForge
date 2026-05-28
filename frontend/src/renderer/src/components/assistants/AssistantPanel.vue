@@ -311,6 +311,7 @@ const projectIdRef = computed(() => projectStore.currentProject?.id || null)
 
 const sessionHistory = useAssistantSessionHistory({
   projectId: projectIdRef,
+  projectName: computed(() => projectStore.currentProject?.name || null),
   messages,
   currentSession,
   historySessions,

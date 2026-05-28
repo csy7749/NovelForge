@@ -16,6 +16,24 @@ interface BuildArchiveOptions {
   exportedAt?: number
 }
 
+interface BuildFilenameOptions {
+  projectId: number
+  projectName?: string | null
+  timestamp?: number
+}
+
+function sanitizeFilenameSegment(value: string): string {
+  return value
+    .trim()
+    .split('')
+    .map(char => (char.charCodeAt(0) < 32 ? '-' : char))
+    .join('')
+    .replace(/[<>:"/\\|?*]/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -104,7 +122,9 @@ export function mergeAssistantSessions(
   return Array.from(byId.values()).sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
-export function buildAssistantSessionArchiveFilename(projectId: number, timestamp = Date.now()): string {
-  const date = new Date(timestamp).toISOString().slice(0, 10)
-  return `${DEFAULT_FILE_PREFIX}-project-${projectId}-${date}.json`
+export function buildAssistantSessionArchiveFilename(options: BuildFilenameOptions): string {
+  const date = new Date(options.timestamp ?? Date.now()).toISOString().slice(0, 10)
+  const projectName = options.projectName ? sanitizeFilenameSegment(options.projectName) : ''
+  const projectPart = projectName ? `${projectName}-project-${options.projectId}` : `project-${options.projectId}`
+  return `${DEFAULT_FILE_PREFIX}-${projectPart}-${date}.json`
 }

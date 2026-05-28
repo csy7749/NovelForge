@@ -1,5 +1,6 @@
 import {
   buildAssistantSessionArchive,
+  buildAssistantSessionArchiveFilename,
   mergeAssistantSessions,
   parseAssistantSessionArchive,
 } from './assistantSessionArchive'
@@ -53,3 +54,13 @@ const merged = mergeAssistantSessions([
 
 assert(merged.length === 2, 'merge should dedupe by id and keep new sessions')
 assert(merged[0]?.title === '更新后的灵感', 'merge should keep newest duplicate session')
+
+const filename = buildAssistantSessionArchiveFilename({
+  projectId: 7,
+  projectName: '星海/计划',
+  timestamp: Date.UTC(2026, 4, 28),
+})
+assert(
+  filename === 'novelforge-assistant-history-星海-计划-project-7-2026-05-28.json',
+  'filename should include sanitized project name',
+)

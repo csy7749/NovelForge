@@ -82,6 +82,17 @@ export function setupWebMock(): void {
         console.log(`[WebMock] openIdeasHome`)
         window.open('/#/ideas-home', '_blank')
         return { success: true }
+      },
+      exportAssistantHistory: async (payload: { filename: string; content: string }) => {
+        console.log(`[WebMock] exportAssistantHistory ${payload.filename}`)
+        const blob = new Blob([payload.content], { type: 'application/json;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = payload.filename
+        link.click()
+        URL.revokeObjectURL(url)
+        return { success: true, filePath: payload.filename }
       }
     }
   }

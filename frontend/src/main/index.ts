@@ -1,5 +1,6 @@
 import { app, shell, BrowserWindow, session, ipcMain } from 'electron'
-import { join } from 'path'
+import { basename, join, resolve } from 'path'
+import { mkdir, writeFile } from 'fs/promises'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import keytar from 'keytar'
@@ -7,6 +8,42 @@ import keytar from 'keytar'
 const KEYTAR_SERVICE_NAME = 'NovelForge-LLM'
 
 const studioWindows = new Map<string, BrowserWindow>()
+const ASSISTANT_HISTORY_DIR_NAME = 'assistant-history'
+
+interface ExportAssistantHistoryPayload {
+  filename: string
+  content: string
+}
+
+function getAssistantHistoryDir(): string {
+  return resolve(app.getAppPath(), '..', ASSISTANT_HISTORY_DIR_NAME)
+}
+
+function sanitizeExportFilename(filename: string): string {
+  const withoutControlChars = basename(filename)
+    .split('')
+    .map(char => (char.charCodeAt(0) < 32 ? '-' : char))
+    .join('')
+  const cleaned = withoutControlChars.replace(/[<>:"/\\|?*]/g, '-').trim()
+  if (!cleaned || !cleaned.endsWith('.json')) {
+    throw new Error('导出文件名必须是 .json 文件')
+  }
+  return cleaned
+}
+
+async function exportAssistantHistory(payload: ExportAssistantHistoryPayload): Promise<{ success: boolean; filePath?: string; error?: string }> {
+  try {
+    const filename = sanitizeExportFilename(payload.filename)
+    const outputDir = getAssistantHistoryDir()
+    const filePath = join(outputDir, filename)
+    await mkdir(outputDir, { recursive: true })
+    await writeFile(filePath, payload.content, 'utf8')
+    return { success: true, filePath }
+  } catch (error) {
+    console.error('Failed to export assistant history:', error)
+    return { success: false, error: (error as Error).message }
+  }
+}
 
 function createWindow(): void {
   // Create the browser window.
@@ -55,7 +92,7 @@ function createWindow(): void {
   })
 }
 
-function openIdeasHome() {
+function openIdeasHome(): void {
   const key = `ideas-home`
   const existing = studioWindows.get(key)
   if (existing && !existing.isDestroyed()) { existing.focus(); return }
@@ -117,6 +154,7 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('ideas:open-home', async () => { openIdeasHome(); return { success: true } })
+  ipcMain.handle('assistant-history:export', async (_, payload: ExportAssistantHistoryPayload) => exportAssistantHistory(payload))
 
   createWindow()
 
