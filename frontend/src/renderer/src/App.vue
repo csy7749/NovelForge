@@ -11,6 +11,7 @@ import { useUpdateStore } from './stores/useUpdateStore'
 import { useWorkflowStore } from './stores/useWorkflowStore'
 import type { components } from '@renderer/types/generated'
 import { schemaService } from './api/schema'
+import { confirmLeaveWithUnsavedCards, hasUnsavedCards } from './services/unsavedCardPrompt'
 
 const IdeasHome = defineAsyncComponent(() => import('./views/IdeasHome.vue'))
 const CodeWorkflowEditor = defineAsyncComponent(() => import('./views/workflow/CodeWorkflowEditor.vue'))
@@ -26,12 +27,14 @@ const workflowStore = useWorkflowStore()
 const { currentView, settingsDialogVisible } = storeToRefs(appStore)
 const { currentProject } = storeToRefs(projectStore)
 
-function handleProjectSelected(project: Project) {
+async function handleProjectSelected(project: Project): Promise<void> {
+  if (!(await confirmLeaveWithUnsavedCards())) return
   projectStore.setCurrentProject(project)
   appStore.goToEditor()
 }
 
-function handleBackToDashboard() {
+async function handleBackToDashboard(): Promise<void> {
+  if (!(await confirmLeaveWithUnsavedCards())) return
   projectStore.reset()
   appStore.goToDashboard()
 }
@@ -49,16 +52,19 @@ const isNoHeader = computed(() => {
   return h.startsWith('#/ideas-home')
 })
 
-async function syncViewFromHash() {
+async function syncViewFromHash(): Promise<void> {
   const hash = window.location.hash || ''
   if (hash.startsWith('#/ideas-home')) {
+    if (currentView.value !== 'ideas' && !(await confirmLeaveWithUnsavedCards())) return
     appStore.goToIdeas()
     try { await projectStore.loadFreeProject() } catch {}
   }
   if (hash.startsWith('#/workflows')) {
+    if (currentView.value !== 'workflows' && !(await confirmLeaveWithUnsavedCards())) return
     appStore.goToWorkflows()
   }
   if (hash.startsWith('#/code-workflows')) {
+    if (currentView.value !== 'code-workflows' && !(await confirmLeaveWithUnsavedCards())) return
     appStore.goToCodeWorkflows()
   }
 }
@@ -69,6 +75,7 @@ onMounted(async () => {
   schemaService.loadSchemas() // Load all schemas on app startup
   syncViewFromHash()
   window.addEventListener('hashchange', syncViewFromHash)
+  window.addEventListener('beforeunload', handleBeforeUnload)
   
   // 设置工作流监听器（监听响应头中的 X-Workflows-Started）
   const cleanupWorkflowListener = workflowStore.setupWorkflowListener()
@@ -91,7 +98,14 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('hashchange', syncViewFromHash)
+  window.removeEventListener('beforeunload', handleBeforeUnload)
 })
+
+function handleBeforeUnload(event: BeforeUnloadEvent): void {
+  if (!hasUnsavedCards()) return
+  event.preventDefault()
+  event.returnValue = ''
+}
 </script>
 
 <template>

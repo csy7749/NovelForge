@@ -153,7 +153,7 @@
 
     <!-- 中栏主内容区 -->
     <el-main class="main-content">
-      <el-tabs v-model="activeTab" type="border-card" class="main-tabs">
+      <el-tabs v-model="activeTab" type="border-card" class="main-tabs" :before-leave="beforeMainTabLeave">
         <el-tab-pane label="卡片库" name="market">
           <CardMarket @edit-card="handleEditCard" />
         </el-tab-pane>
@@ -408,6 +408,7 @@ import { getProjects } from '@renderer/api/projects'
 import { getCardsForProject, copyCard, getCardAIParams, searchCards } from '@renderer/api/cards'
 import { generateAIContent } from '@renderer/api/ai'
 import type { AssistantRef, ChapterExcerptRef, ReviewResultRef } from '@renderer/api/ai'
+import { confirmLeaveWithUnsavedCards } from '@renderer/services/unsavedCardPrompt'
  
  // Mock components that will be created later
  const CardEditorHost = defineAsyncComponent(() => import('@renderer/components/cards/CardEditorHost.vue'));
@@ -564,6 +565,7 @@ const groupedTree = computed(() => buildGroupedNodes(cardTree.value as unknown a
 
 // Local State
 const activeTab = ref('market')
+const skipNextMainTabGuard = ref(false)
 const relationGraphRefreshSeq = ref(0)
 const activeRightTab = ref('assistant')
 const isCreateCardDialogVisible = ref(false)
@@ -932,8 +934,11 @@ async function onExternalDropToNode(e: DragEvent, nodeData: any) {
  // --- Methods ---
 
 // 点击行为对"分组节点"不做打开编辑，仅用于展开/折叠。对实际卡片才触发编辑。
-function handleNodeClick(data: any) {
+async function handleNodeClick(data: any): Promise<void> {
   if (data.__isGroup) return
+  if (Number((activeCard.value as any)?.id || 0) !== Number(data.id)) {
+    if (!(await confirmLeaveWithUnsavedCards())) return
+  }
   
   // 确保点击的卡片被选中（用于UI高亮），同时覆盖 handleCardClick 中的清空操作
   selectedCardIds.value = [data.id]
@@ -942,7 +947,7 @@ function handleNodeClick(data: any) {
   // 章节正文现在也在中栏编辑器中打开
   cardStore.setActiveCard(data.id)
   assistantSelectionCleared.value = false
-  activeTab.value = 'editor'
+  await switchMainTab('editor', { confirmLeave: false })
   try {
     const pid = projectStore.currentProject?.id as number
     const pname = projectStore.currentProject?.name || ''
@@ -964,10 +969,10 @@ function handleNodeClick(data: any) {
 }
 
 // 卡片点击处理（支持多选）
-function handleCardClick(event: MouseEvent, data: any) {
+async function handleCardClick(event: MouseEvent, data: any): Promise<void> {
   // 分组节点不支持多选
   if (data.__isGroup) {
-    handleNodeClick(data)
+    await handleNodeClick(data)
     return
   }
   
@@ -1210,9 +1215,12 @@ function onNodeCollapse(_: any, node: any) {
   removeRecursively(node)
 }
 
-function handleEditCard(cardId: number) {
+async function handleEditCard(cardId: number): Promise<void> {
+  if (Number((activeCard.value as any)?.id || 0) !== Number(cardId)) {
+    if (!(await confirmLeaveWithUnsavedCards())) return
+  }
   cardStore.setActiveCard(cardId);
-  activeTab.value = 'editor';
+  await switchMainTab('editor', { confirmLeave: false })
 }
 
 async function handleCreateCard() {
@@ -1280,18 +1288,18 @@ function getIconByCardType(typeName?: string) {
 }
 
 // 右键菜单命令处理（新建子卡片、删除卡片）
-function handleContextCommand(command: string, data: any) {
+async function handleContextCommand(command: string, data: any): Promise<void> {
   if (command === 'create-child') {
-    openCreateChild(data.id)
+    await openCreateChild(data.id)
   } else if (command === 'create-child-in-group') {
     // 分组节点：使用实际父卡片ID，并预设卡片类型
-    openCreateChildInGroup(data.__parentCardId, data.__groupType)
+    await openCreateChildInGroup(data.__parentCardId, data.__groupType)
   } else if (command === 'delete') {
-    deleteNode(data.id, data.title)
+    await deleteNode(data.id, data.title)
   } else if (command === 'batch-delete') {
-    batchDeleteCards()
+    await batchDeleteCards()
   } else if (command === 'delete-group') {
-    deleteGroupNodes(data)
+    await deleteGroupNodes(data)
   } else if (command === 'edit-structure') {
      if (!data?.id || data.__isGroup) return
      openCardSchemaStudio(data)
@@ -1331,7 +1339,8 @@ async function onCardSchemaSaved() {
   } catch {}
 }
 
-function openCreateCardDialog(options?: { title?: string; cardTypeName?: string; parentId?: number | null }) {
+async function openCreateCardDialog(options?: { title?: string; cardTypeName?: string; parentId?: number | null }): Promise<void> {
+  if (!(await switchMainTab('editor'))) return
   newCardForm.title = options?.title || ''
   newCardForm.parent_id = options?.parentId == null ? '' as any : options.parentId as any
   if (options?.cardTypeName) {
@@ -1340,28 +1349,27 @@ function openCreateCardDialog(options?: { title?: string; cardTypeName?: string;
   } else {
     newCardForm.card_type_id = undefined
   }
-  activeTab.value = 'editor'
   isCreateCardDialogVisible.value = true
   blankMenuVisible.value = false
 }
 
 // 打开"新建卡片"对话框并预填父ID
-function openCreateChild(parentId: number) {
-  openCreateCardDialog({ parentId })
+async function openCreateChild(parentId: number): Promise<void> {
+  await openCreateCardDialog({ parentId })
 }
 
 // 打开"新建卡片"对话框（分组节点专用）：预填父ID和卡片类型
-function openCreateChildInGroup(parentId: number, groupType: string) {
-  openCreateCardDialog({ parentId, cardTypeName: groupType })
+async function openCreateChildInGroup(parentId: number, groupType: string): Promise<void> {
+  await openCreateCardDialog({ parentId, cardTypeName: groupType })
 }
 
-function openCreateRoot() {
-  openCreateCardDialog()
+async function openCreateRoot(): Promise<void> {
+  await openCreateCardDialog()
 }
 
-function onOpenCreateCardEvent(e: Event) {
+async function onOpenCreateCardEvent(e: Event): Promise<void> {
   const detail = (e as CustomEvent)?.detail || {}
-  openCreateCardDialog({
+  await openCreateCardDialog({
     title: typeof detail.title === 'string' ? detail.title : '',
     cardTypeName: typeof detail.cardTypeName === 'string' ? detail.cardTypeName : '',
     parentId: Number.isFinite(Number(detail.parentId)) ? Number(detail.parentId) : null,
@@ -1639,6 +1647,25 @@ watch(activeTab, (tab) => {
   }
 })
 
+async function beforeMainTabLeave(nextTab: string | number, currentTab: string | number): Promise<boolean> {
+  if (String(nextTab) === String(currentTab)) return true
+  if (skipNextMainTabGuard.value) {
+    skipNextMainTabGuard.value = false
+    return true
+  }
+  return confirmLeaveWithUnsavedCards()
+}
+
+async function switchMainTab(tab: string, options: { confirmLeave?: boolean } = {}): Promise<boolean> {
+  if (tab === activeTab.value) return true
+  if (options.confirmLeave !== false && !(await confirmLeaveWithUnsavedCards())) return false
+  skipNextMainTabGuard.value = true
+  activeTab.value = tab
+  await nextTick()
+  skipNextMainTabGuard.value = false
+  return true
+}
+
 function resetAssistantSelection() {
   assistantSelectionCleared.value = true
   assistantResolvedContext.value = ''
@@ -1717,8 +1744,9 @@ async function onAssistantFinalize(e: CustomEvent) {
 }
 
 // 助手 chips 跳转卡片
-async function handleJumpToCard(payload: { projectId: number; cardId: number }) {
+async function handleJumpToCard(payload: { projectId: number; cardId: number }): Promise<void> {
   try {
+    if (!(await confirmLeaveWithUnsavedCards())) return
     const curPid = projectStore.currentProject?.id
     if (curPid !== payload.projectId) {
       // 切换项目：从全部项目列表中找到目标项目并设置
@@ -1731,7 +1759,7 @@ async function handleJumpToCard(payload: { projectId: number; cardId: number }) 
     }
     // 激活目标卡（仅导航，不改动 injectedRefs）
     cardStore.setActiveCard(payload.cardId)
-    activeTab.value = 'editor'
+    await switchMainTab('editor', { confirmLeave: false })
   } catch {}
 }
 
@@ -1784,16 +1812,16 @@ onMounted(async () => {
    window.removeEventListener('nf:open-create-card', onOpenCreateCardEvent as any)
   })
 
- function onNavigate(e: CustomEvent) {
+ async function onNavigate(e: CustomEvent): Promise<void> {
    if ((e as any).detail?.to === 'market') {
-     activeTab.value = 'market'
+     await switchMainTab('market')
    }
  }
 
-function onSwitchMainTab(e: CustomEvent) {
+async function onSwitchMainTab(e: CustomEvent): Promise<void> {
   const tab = (e as any)?.detail?.tab
   if (tab && ['market', 'editor', 'relation-graph'].includes(tab)) {
-    activeTab.value = tab
+    await switchMainTab(tab)
   }
 }
 

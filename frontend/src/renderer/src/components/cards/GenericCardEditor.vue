@@ -237,6 +237,7 @@ import InitialPromptDialog from '../generation/InitialPromptDialog.vue'
 import { InstructionExecutor } from '@renderer/services/instructionExecutor'
 import { generateWithInstructionStream } from '@renderer/api/generation'
 import type { Instruction, ConversationMessage } from '@renderer/types/instruction'
+import { unsavedCardGuard } from '@renderer/services/unsavedCardGuard'
 
 const props = defineProps<{
   card: CardRead
@@ -815,6 +816,20 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', keyHandler)
 })
 
+watch(
+  () => [props.card.id, titleProxy.value] as const,
+  (_, __, onCleanup) => {
+    const unregister = unsavedCardGuard.register({
+      cardId: props.card.id,
+      title: titleProxy.value || props.card.title || '未命名卡片',
+      isDirty: () => isDirty.value,
+      save: handleSave,
+    })
+    onCleanup(unregister)
+  },
+  { immediate: true }
+)
+
 // 在抽屉中输入 @ 时弹出选择器
 let drawerTextarea: HTMLTextAreaElement | null = null
 watch(() => openDrawer.value, (v) => {
@@ -900,6 +915,7 @@ async function handleSave() {
       ElMessage.success('保存成功')
     } catch (e) {
       ElMessage.error('保存失败')
+      throw e
     } finally {
       isSaving.value = false
     }

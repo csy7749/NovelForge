@@ -5,6 +5,7 @@ import { Setting, Sunny, Moon, Document } from '@element-plus/icons-vue'
 import { useAppStore } from '@renderer/stores/useAppStore'
 import { useProjectStore } from '@renderer/stores/useProjectStore'
 import { useUpdateStore } from '@renderer/stores/useUpdateStore'
+import { confirmLeaveWithUnsavedCards } from '@renderer/services/unsavedCardPrompt'
 import KnowledgeManager from '../setting/KnowledgeManager.vue'
 
 const appStore = useAppStore()
@@ -20,13 +21,15 @@ function openSettingsDialog() {
   appStore.openSettings()
 }
 
-function openWorkflowManager() {
+async function openWorkflowManager(): Promise<void> {
+  if (!(await confirmLeaveWithUnsavedCards())) return
   appStore.goToWorkflows()
   window.location.hash = '#/workflows'
 }
 
-function handleLogoClick() {
+async function handleLogoClick(): Promise<void> {
   if (currentView.value !== 'dashboard') {
+    if (!(await confirmLeaveWithUnsavedCards())) return
     appStore.goToDashboard()
   }
 }
